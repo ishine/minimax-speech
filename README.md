@@ -145,6 +145,9 @@ This project follows the licensing terms of its dependencies:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Disclaimer
+The content provided above is for academic purposes only and is intended to demonstrate technical capabilities.
+
 ## Contact
 
 [nguyennhutsam.math@gmail.com, https://www.linkedin.com/in/primepake/]

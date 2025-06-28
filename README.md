@@ -147,4 +147,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Contact
 
-[Your contact information or links to issues/discussions]
+[nguyennhutsam.math@gmail.com, https://www.linkedin.com/in/primepake/]

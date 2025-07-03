@@ -30,7 +30,7 @@ Maps discrete tokens to a continuous latent space using a Variational Autoencode
 ### 1. Model Training
 
 #### BPE tokens to DAC codec tokens
-- Based on the 
+- Based on the DAC codec
 - Using Auto Regressive to predict the DAC codec tokens with learnable speaker extractor
 
 #### DAC codec tokens to DAC-VAE latent

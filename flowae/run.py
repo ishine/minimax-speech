@@ -13,7 +13,7 @@ def make_args():
     parser.add_argument('--tag', '-t', default=None)
     parser.add_argument('--resume', '-r', action='store_true')
     parser.add_argument('--force-replace', '-f', action='store_true')
-    parser.add_argument('--wandb', '-w', action='store_true')
+    parser.add_argument('--comet', '-c', action='store_true', help='Enable Comet ML logging')
     parser.add_argument('--save-root', default='save')
     parser.add_argument('--eval-only', action='store_true')
     args = parser.parse_args()
@@ -45,7 +45,7 @@ def make_env(args):
     env['exp_name'] = exp_name
     
     env['save_dir'] = os.path.join(args.save_root, exp_name)
-    env['wandb'] = args.wandb
+    env['comet'] = args.comet
     env['resume'] = args.resume
     env['force_replace'] = args.force_replace
     return env

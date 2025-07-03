@@ -29,27 +29,25 @@ Maps discrete tokens to a continuous latent space using a Variational Autoencode
 
 ### 1. Model Training
 
-#### DAC Codec
-- Based on the [Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec)
-- Provides efficient audio tokenization
-- Utilizes CosyVoice2's optimized training pipeline
+#### BPE tokens to DAC codec tokens
+- Based on the 
+- Using Auto Regressive to predict the DAC codec tokens with learnable speaker extractor
 
-#### DAC-VAE
-- Train using `train_dac_vae.py`
+#### DAC codec tokens to DAC-VAE latent
+- Based on Cosyvoice2 flow matching decoder
 - Learns continuous latent representations from discrete tokens
-- Architecture adapted from CosyVoice2's VAE implementation
 
 ### 2. Feature Extraction
 
 Before training the main model:
-1. Extract discrete tokens using the trained DAC codec
-2. Generate continuous latent representations using the trained DAC-VAE
+1. Extract discrete tokens using the trained DAC codec [Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec)
+2. Generate continuous latent representations using the trained DAC-VAE - the pretrained I provided here: [DAC-VAE](https://drive.google.com/file/d/1iwZhPlcdDwvPjeON3bFAeYarsV4ZtI2E/view?usp=sharing)
 
 ### 3. Two-Stage Training
 
 Train the models sequentially:
-- **Stage 1**: Audio → Discrete token modeling
-- **Stage 2**: Discrete token → Continuous latent space modeling
+- **Stage 1**: BPE tokens → Discrete DAC codec 
+- **Stage 2**: Discrete DAC codec → DAC-VAE Continuous latent space
 
 ## Getting Started
 
@@ -61,22 +59,22 @@ pip install -r requirements.txt
 
 ### Training Pipeline
 
-1. **Train DAC Codec** (if not using pretrained)
+1. **Extracting DAC Codec** (if not using pretrained)
    ```bash
    # Add training command
    ```
 
-2. **Train DAC-VAE**
+2. **Extracting DAC-VAE latent**
    ```bash
-   python train_dac_vae.py --config configs/dac_vae.yaml
+   python inference.py
    ```
 
-3. **Extract Features**
+3. **Stage 1: Auto Regressive Transformer**
    ```bash
    # Add feature extraction commands
    ```
 
-4. **Train MiniMax-Speech**
+4. **Stage 2: FLow matching decoder**
    ```bash
    # Add main training command
    ```

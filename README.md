@@ -66,7 +66,8 @@ pip install -r requirements.txt
 
 2. **Extracting DAC-VAE latent**
    ```bash
-   python inference.py
+   cd dac-vae
+   python inference.py --checkpoint checkpoint.pt --config config.yml
    ```
 
 3. **Stage 1: Auto Regressive Transformer**

@@ -8,12 +8,16 @@ model:
     # Encoder
     encoder:
       name: dac_encoder
-      args: {config_name: snakebeta}
+      args: {config_name: snake}
     
     # Latent configuration - now fully convolutional
     z_channels: 64  # Number of latent channels
-    z_downsample_factor: 320  # Product of encoder_rates: 2*4*5*8
-    z_layernorm: true
+
+    zaug_p: 0.1
+    zaug_decoding_loss_type: suffix
+    zaug_zdm_diffusion:
+      name: fm
+      args: {timescale: 1000.0}
     
     # Decoder (identity for DiTo)
     decoder:
@@ -21,10 +25,10 @@ model:
     
     # Renderer - Fully convolutional for dynamic duration
     renderer:
-      name: audio_renderer_wrapper
+      name: fixres_renderer_wrapper
       args:
         net:
-          name: consistency_decoder_unet  # Fully Convolutional Network
+          name: audio_diffusion_unet
           args:
             in_channels: 1
             z_dec_channels: 64
@@ -39,6 +43,6 @@ model:
       name: fm
       args: {timescale: 1000.0}
     
-    render_sampler: {name: fm_euler_sampler}
+    render_sampler: {name: fm_euler_sampler_audio}
     render_n_steps: 50
 

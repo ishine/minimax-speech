@@ -4,22 +4,19 @@ datasets:
     name: wrapper_audio_cae
     args:
       dataset:
-        name: audio_dataset_from_folders
+        name: class_folder_audio
         args:
-          folders:
-            Emilia_EN: ["/home/masuser/minimax-audio/dataset/Emilia/EN"]
+          root_path: "/home/masuser/minimax-audio/dataset/Emilia/EN"
           sample_rate: 24000
           duration: 0.38
-          n_examples: 10000000
           shuffle: true
-          mono: true
+          num_channels: 1
       sample_rate: 24000
       duration: 0.38
       mono: true
       normalize: true
-      return_coords: true
     loader:
-      batch_size: 64
+      batch_size: 52
       num_workers: 8
       drop_last: true
       
@@ -27,20 +24,17 @@ datasets:
     name: wrapper_audio_cae
     args:
       dataset:
-        name: audio_dataset_from_folders
+        name: class_folder_audio
         args:
-          folders:
-            Emilia_EN: ["/home/masuser/minimax-audio/dataset/libritts"]
+          root_path: "/home/masuser/minimax-audio/dataset/libritts"
           sample_rate: 24000
           duration: 5.0
-          n_examples: 100
           shuffle: false
-          mono: true
+          num_channels: 1
       sample_rate: 24000
       duration: 5.0
       mono: true
       normalize: true
-      return_coords: true
     loader:
       batch_size: 4
       num_workers: 8
@@ -50,20 +44,17 @@ datasets:
     name: wrapper_audio_cae
     args:
       dataset:
-        name: audio_dataset_from_folders
+        name: class_folder_audio
         args:
-          folders:
-            Emilia_EN: ["/home/masuser/minimax-audio/dataset/libritts"]
+          root_path: "/home/masuser/minimax-audio/dataset/libritts"
           sample_rate: 24000
-          duration: 10.0
-          n_examples: 1000
+          duration: 5.0
           shuffle: false
-          mono: true
+          num_channels: 1
       sample_rate: 24000
-      duration: 10.0
+      duration: 5.0
       mono: true
       normalize: true
-      return_coords: true
     loader:
       batch_size: 1
       num_workers: 8

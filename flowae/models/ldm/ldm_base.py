@@ -47,6 +47,39 @@ class LDMBase(nn.Module):
         use_ema_decoder=False,
         use_ema_renderer=False,
     ):
+        print('print all the args   ')
+        print("encoder: ", encoder)
+        print("z_shape: ",z_shape)
+        print("decoder: ",decoder)
+        print("renderer: ",renderer)
+        print("encoder_ema_rate: ",encoder_ema_rate)
+        print("decoder_ema_rate: ",decoder_ema_rate)
+        print("renderer_ema_rate: ",renderer_ema_rate)
+        print("z_gaussian: ",z_gaussian)
+        print("z_gaussian_sample: ",z_gaussian_sample)
+        print("z_quantizer: ",z_quantizer)
+        print("z_quantizer_n_embed: ",z_quantizer_n_embed)
+        print("z_quantizer_beta: ",z_quantizer_beta)
+        print("z_layernorm: ",z_layernorm)
+        print("zaug_p: ",zaug_p)
+        print("zaug_tmax: ",zaug_tmax)
+        print("zaug_tmax_always: ",zaug_tmax_always)
+        print("zaug_decoding_loss_type: ",zaug_decoding_loss_type)
+        print("zaug_zdm_diffusion: ",zaug_zdm_diffusion)
+        print("gt_noise_lb: ",gt_noise_lb)
+        print("drop_z_p: ",drop_z_p)
+        print("zdm_net: ",zdm_net)
+        print("zdm_diffusion: ",zdm_diffusion)
+        print("zdm_sampler: ",zdm_sampler)
+        print("zdm_n_steps: ",zdm_n_steps)
+        print("zdm_ema_rate: ",zdm_ema_rate)
+        print("zdm_train_normalize: ",zdm_train_normalize)
+        print("zdm_class_cond: ",zdm_class_cond)
+        print("zdm_force_guidance: ",zdm_force_guidance)
+        print("loss_config: ",loss_config)
+        print("use_ema_encoder: ",use_ema_encoder)
+        print("use_ema_decoder: ",use_ema_decoder)
+        print("use_ema_renderer: ",use_ema_renderer)
         super().__init__()
         self.loss_config = loss_config if loss_config is not None else dict()
         
@@ -442,3 +475,194 @@ class DiagonalGaussianDistribution(object):
 
     def mode(self):
         return self.mean
+
+
+class LDMBaseAudio(nn.Module):
+    def __init__(
+        self,
+        encoder,
+        z_channels,
+        decoder,
+        renderer,
+        zaug_p=0.1,
+        zaug_tmax=1.0,
+        zaug_tmax_always=False,
+        zaug_decoding_loss_type='all',
+        zaug_zdm_diffusion={'name': 'fm', 'args': {'timescale': 1000.0}},
+        zdm_ema_rate=0.9999,
+        loss_config={},
+        encoder_ema_rate=None,
+        decoder_ema_rate=None,
+        renderer_ema_rate=None,
+    ):
+        super().__init__()
+        self.loss_config = loss_config
+        
+        self.encoder = models.make(encoder)
+        self.decoder = models.make(decoder)
+        self.renderer = models.make(renderer)
+        
+
+        self.z_layernorm = nn.LayerNorm(
+            z_channels,  # e.g., 64
+            elementwise_affine=False
+        )
+
+        self.zaug_p = zaug_p
+        self.zaug_tmax = zaug_tmax
+        self.zaug_tmax_always = zaug_tmax_always
+        self.zaug_decoding_loss_type = zaug_decoding_loss_type
+        if zaug_zdm_diffusion is not None:
+            self.zaug_zdm_diffusion = models.make(zaug_zdm_diffusion)
+
+        # EMA models #
+        self.encoder_ema_rate = encoder_ema_rate
+        if self.encoder_ema_rate is not None:
+            self.encoder_ema = copy.deepcopy(self.encoder)
+            for p in self.encoder_ema.parameters():
+                p.requires_grad = False
+        
+        self.decoder_ema_rate = decoder_ema_rate
+        if self.decoder_ema_rate is not None:
+            self.decoder_ema = copy.deepcopy(self.decoder)
+            for p in self.decoder_ema.parameters():
+                p.requires_grad = False
+        
+        self.renderer_ema_rate = renderer_ema_rate
+        if self.renderer_ema_rate is not None:
+            self.renderer_ema = copy.deepcopy(self.renderer)
+            for p in self.renderer_ema.parameters():
+                p.requires_grad = False
+        #
+
+    def get_grad_plan(self, has_optimizer):
+        if has_optimizer is None:
+            has_optimizer = dict()
+        grad = dict()
+        grad['encoder'] = has_optimizer.get('encoder', False)
+        grad['decoder'] = grad['encoder'] or has_optimizer.get('decoder', False)
+        grad['renderer'] = grad['decoder'] or has_optimizer.get('renderer', False)
+        return grad
+
+    def normalize_latents(self, z):
+        # z shape: [batch, latent_dim, n_frames] - n_frames can vary!
+        # print('bef z shape: ', z.shape)
+        z = z.transpose(-2, -1)  # [batch, latent_dim, n_frames]
+        # print('z shape: ', z.shape)
+        z = self.z_layernorm(z)  # Normalize over latent_dim for each time step
+        # print('z shape: ', z.shape)
+        z = z.transpose(-2, -1)  # [batch, latent_dim, n_frames]
+        # print('z shape: ', z.shape)
+        return z
+
+    def update_ema(self):
+        if self.encoder_ema_rate is not None:
+            self.update_ema_fn(self.encoder_ema, self.encoder, self.encoder_ema_rate)
+        if self.decoder_ema_rate is not None:
+            self.update_ema_fn(self.decoder_ema, self.decoder, self.decoder_ema_rate)
+        if self.renderer_ema_rate is not None:
+            self.update_ema_fn(self.renderer_ema, self.renderer, self.renderer_ema_rate)
+
+    def get_parameters(self, name):
+        if name == 'encoder':
+            return self.encoder.parameters()
+        elif name == 'decoder':
+            p = list(self.decoder.parameters())
+            if self.z_quantizer is not None:
+                p += list(self.z_quantizer.parameters())
+            return p
+        elif name == 'renderer':
+            return self.renderer.parameters()
+        elif name == 'zdm':
+            return self.zdm_net.parameters()
+
+    def encode(self, x):
+        
+        z = self.encoder(x)
+        # print('z shape: ', z.shape)
+        z = self.normalize_latents(z)
+        # print('after norm z shape: ', z.shape)
+        
+        if (self.zaug_p is not None) and self.training:
+            assert self.z_layernorm is not None # ensure 0 mean 1 std
+            if self.zaug_tmax_always:
+                tz = torch.ones(z.shape[0], device=z.device) * self.zaug_tmax
+            else:
+                tz = torch.rand(z.shape[0], device=z.device) * self.zaug_tmax
+
+            zt, _ = self.zaug_zdm_diffusion.add_noise(z, tz)
+            mask_aug = (torch.rand(z.shape[0], device=z.device) < self.zaug_p).float()
+            if z.dim() == 4:  # Image: [batch, channels, height, width]
+                mask_shape = (-1, 1, 1, 1)
+            elif z.dim() == 3:  # Audio: [batch, channels, n_frames]  
+                mask_shape = (-1, 1, 1)
+            else:
+                raise ValueError(f"Unsupported tensor dimension: {z.dim()}")
+            
+            z = mask_aug.view(*mask_shape) * zt + (1 - mask_aug).view(*mask_shape) * z
+            # z = mask_aug.view(-1, 1, 1, 1) * zt + (1 - mask_aug).view(-1, 1, 1, 1) * z
+            self._tz = tz
+            self._mask_aug = mask_aug
+
+        # print('after zaug z shape: ', z.shape)
+
+        return z
+        
+
+    def decode(self, z):
+        z_dec = self.decoder(z)
+        return z_dec
+       
+    def render(self, z_dec):
+        raise NotImplementedError
+
+    def forward(self, data, mode, has_optimizer=None):
+        loss = torch.tensor(0., device=data['inp'].device)
+        ret = dict()
+        # print("data['inp'] shape: ", data['inp'].shape)
+        z = self.encode(data['inp'])
+       
+        z_dec = self.decode(z)
+    
+
+        ret['loss'] = loss
+        return z_dec, ret
+
+    def generate_samples(
+        self,
+        batch_size,
+        n_steps,
+        net_kwargs=None,
+        uncond_net_kwargs=None,
+        ema=False,
+        guidance=1.0,
+        noise=None,
+        return_z=False,
+    ):
+        if self.zdm_force_guidance is not None:
+            guidance = self.zdm_force_guidance
+        
+        shape = (batch_size,) + self.z_shape
+        net = self.zdm_net if not ema else self.zdm_net_ema
+        
+        z = self.zdm_sampler.sample(
+            net,
+            shape,
+            n_steps,
+            net_kwargs=net_kwargs,
+            uncond_net_kwargs=uncond_net_kwargs,
+            guidance=guidance,
+            noise=noise,
+        )
+
+        if return_z:
+            return z
+
+        if (self.zaug_p is not None) and self.zaug_tmax_always:
+            tz = torch.ones(z.shape[0], device=z.device) * self.zaug_tmax
+            z, _ = self.zaug_zdm_diffusion.add_noise(z, tz)
+        
+        z = self.denormalize_for_zdm(z)
+        z_dec = self.decode(z)
+
+        return self.render(z_dec)

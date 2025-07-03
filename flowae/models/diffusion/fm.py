@@ -22,6 +22,21 @@ class FM:
     
     def B(self, t):
         return -(1.0 - self.sigma_min)
+
+    def _get_reduction_dims(self, x):
+        """Get appropriate dimensions for loss reduction based on tensor shape"""
+        if x.dim() == 4:
+            # Images: [batch, channels, height, width]
+            return [1, 2, 3]
+        elif x.dim() == 3:
+            # Audio: [batch, channels, samples] or [batch, latent_dim, time_frames]
+            return [1, 2]
+        elif x.dim() == 2:
+            # 1D signals: [batch, samples]
+            return [1]
+        else:
+            # Fallback: reduce over all non-batch dimensions
+            return list(range(1, x.dim()))
     
     def get_betas(self, n_timesteps):
         return torch.zeros(n_timesteps) # Not VP and not supported
@@ -38,17 +53,20 @@ class FM:
         
         if t is None:
             t = torch.rand(x.shape[0], device=x.device)
-        print('x shape: ', x.shape)
+        # print('x shape: ', x.shape)
         x_t, noise = self.add_noise(x, t)
-        print('x_t shape: ', x_t.shape)
+        # print('x_t shape: ', x_t.shape)
         pred = net(x_t, t=t * self.timescale, **net_kwargs)
-        print('pred shape: ', pred.shape)
+        # print('pred shape: ', pred.shape)
         
         target = self.A(t) * x + self.B(t) * noise # -dxt/dt
-        print('target shape: ', target.shape)
-        print('return_loss_unreduced: ', return_loss_unreduced, 'return_all: ', return_all)
+        # print('target shape: ', target.shape)
+        # print('return_loss_unreduced: ', return_loss_unreduced, 'return_all: ', return_all)
         if return_loss_unreduced:
-            loss = ((pred.float() - target.float()) ** 2).mean(dim=[1, 2, 3])
+            print('pred shape: ', pred.shape, 'target shape: ', target.shape)
+            reduce_dims = self._get_reduction_dims(x)
+            loss = ((pred.float() - target.float()) ** 2).mean(dim=reduce_dims)
+            # loss = ((pred.float() - target.float()) ** 2).mean(dim=[1, 2, 3])
             if return_all:
                 return loss, t, x_t, pred
             else:

@@ -74,7 +74,7 @@ def get_activation(activation, channels, alpha):
         return nn.LeakyReLU()
     elif activation == "tanh":
         return nn.Tanh()
-    elif activation == "snake_beta":
+    elif activation == "snakebeta":
         return SnakeBeta(channels, alpha)
     else:
         raise ValueError(f"Activation {activation} not supported")

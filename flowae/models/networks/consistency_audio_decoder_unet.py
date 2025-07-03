@@ -135,13 +135,13 @@ class AudioUpsample(nn.Module):
 
         gn_1 = F.silu(self.gn_1(x))
         # 1D interpolation upsampling
-        upsample = F.interpolate(gn_1, scale_factor=self.upsample_factor, mode='nearest')
+        upsample = F.interpolate(gn_1, scale_factor=self.upsample_factor, mode='linear')
         f_1 = self.f_1(upsample)
         gn_2 = self.gn_2(f_1)
 
         f_2 = self.f_2(F.silu(t_2 + (t_1 * gn_2)))
 
-        return f_2 + F.interpolate(x_skip, scale_factor=self.upsample_factor, mode='nearest')
+        return f_2 + F.interpolate(x_skip, scale_factor=self.upsample_factor, mode='linear')
 
 
 @register('audio_diffusion_unet')
@@ -272,7 +272,7 @@ class AudioDiffusionUNet(nn.Module):
             z_proj = F.interpolate(
                 z_proj, 
                 size=x.shape[-1], 
-                mode='nearest'  # or 'linear' for smoother interpolation
+                mode='linear'  # or 'linear' for smoother interpolation
             )
         
         # Add latent conditioning to audio features

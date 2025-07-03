@@ -7,16 +7,16 @@ from .model import Encoder, Decoder, WNConv1d
 
 default_configs = {
     'snake': dict(
-        encoder_dim=64,
-        encoder_rates=[2, 4, 5, 8],
-        latent_dim=64,
+        d_model=64,
+        strides=[2, 4, 5, 8],
+        d_latent=64,
         d_in=1,
         activation='snake',
     ),
-    'snake': dict(
-        encoder_dim=64,
-        encoder_rates=[2, 4, 5, 8],
-        latent_dim=64,
+    'snakebeta': dict(
+        d_model=64,
+        strides=[2, 4, 5, 8],
+        d_latent=64,
         d_in=1,
         activation='snakebeta',
     ),
@@ -27,10 +27,10 @@ default_configs = {
 def make_dac_encoder(config_name, **kwargs):
     encoder_kwargs = default_configs[config_name]
     encoder_kwargs.update(kwargs)
-    latent_dim = encoder_kwargs['latent_dim']
+    d_model = encoder_kwargs['d_model']
     return nn.Sequential(
         Encoder(**encoder_kwargs),
-        WNConv1d(latent_dim, latent_dim, kernel_size=1),
+        WNConv1d(d_model, d_model, kernel_size=1),
     )
 
 
@@ -38,8 +38,8 @@ def make_dac_encoder(config_name, **kwargs):
 def make_vqgan_decoder(config_name, **kwargs):
     decoder_kwargs = default_configs[config_name]
     decoder_kwargs.update(kwargs)
-    latent_dim = decoder_kwargs['latent_dim']
+    d_model = decoder_kwargs['d_model']
     return nn.Sequential(
-        WNConv1d(latent_dim, latent_dim, kernel_size=1),
+        WNConv1d(d_model, d_model, kernel_size=1),
         Decoder(**decoder_kwargs),
     )

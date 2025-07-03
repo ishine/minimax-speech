@@ -239,6 +239,7 @@ class ConsistencyDecoderUNet(nn.Module):
 
     def forward(self, x, t=None, z_dec=None) -> torch.Tensor:
         if z_dec is not None:
+            print('shape of x and z_dec: ', x.shape, z_dec.shape)
             if z_dec.shape[-2] != x.shape[-2] or z_dec.shape[-1] != x.shape[-1]:
                 assert x.shape[-2] // z_dec.shape[-2] == x.shape[-1] // z_dec.shape[-1]
                 z_dec = F.upsample_nearest(z_dec, scale_factor=x.shape[-2] // z_dec.shape[-2])

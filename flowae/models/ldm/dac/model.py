@@ -236,7 +236,8 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         x = F.leaky_relu(x)
-        return self.block(x)
+        x = self.block(x)
+        return x
 
 
 class DecoderBlock(nn.Module):
@@ -478,6 +479,7 @@ class DACVAE(BaseModel, CodecMixin):
     ):
         x = self.encoder(audio_data)
         x = self.en_conv_post(x)
+        print('x shape: ', x.shape)
         m, logs = torch.split(x, self.latent_dim, dim=1)
         logs = torch.clamp(logs, min=-14.0, max=14.0)
 

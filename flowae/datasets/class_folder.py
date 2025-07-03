@@ -6,6 +6,8 @@ from datasets import register
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+import os
+import random
 
 Image.MAX_IMAGE_PIXELS = 933120000
 ImageFile.LOAD_TRUNCATED_IMAGES = True

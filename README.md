@@ -18,7 +18,7 @@ This repository provides an implementation of the MiniMax-Speech model, featurin
 ## Architecture
 
 ### Stage 1: Audio to Discrete Tokens
-Converts raw audio into discrete representations using the DAC (Descript Audio Codec) framework.
+Converts raw audio into discrete representations using the FSQ (S3Tokenizer) framework.
 
 ### Stage 2: Discrete Tokens to Continuous Latent Space
 Maps discrete tokens to a continuous latent space using a Variational Autoencoder (VAE).
@@ -29,25 +29,25 @@ Maps discrete tokens to a continuous latent space using a Variational Autoencode
 
 ### 1. Model Training
 
-#### BPE tokens to DAC codec tokens
-- Based on the DAC codec
-- Using Auto Regressive to predict the DAC codec tokens with learnable speaker extractor
+#### BPE tokens to FSQ tokens
+- Based on the FSQ
+- Using Auto Regressive to predict the FSQ tokens with learnable speaker extractor
 
-#### DAC codec tokens to DAC-VAE latent
+#### FSQ tokens to DAC-VAE latent
 - Based on Cosyvoice2 flow matching decoder
 - Learns continuous latent representations from discrete tokens
 
 ### 2. Feature Extraction
 
 Before training the main model:
-1. Extract discrete tokens using the trained DAC codec [Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec)
+1. Extract discrete tokens using the trained FSQ [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
 2. Generate continuous latent representations using the trained DAC-VAE - the pretrained I provided here: [DAC-VAE](https://drive.google.com/file/d/1iwZhPlcdDwvPjeON3bFAeYarsV4ZtI2E/view?usp=sharing)
 
 ### 3. Two-Stage Training
 
 Train the models sequentially:
-- **Stage 1**: BPE tokens → Discrete DAC codec 
-- **Stage 2**: Discrete DAC codec → DAC-VAE Continuous latent space
+- **Stage 1**: BPE tokens → Discrete FSQ 
+- **Stage 2**: Discrete FSQ → DAC-VAE Continuous latent space
 
 ## Getting Started
 
@@ -59,7 +59,7 @@ pip install -r requirements.txt
 
 ### Training Pipeline
 
-1. **Extracting DAC Codec** (if not using pretrained)
+1. **Extracting FSQ** (if not using pretrained)
    ```bash
    # Add training command
    ```
@@ -88,13 +88,12 @@ minimax-speech/
 ├── configs/
 │   └── dac_vae.yaml
 ├── models/
-│   ├── dac_codec/
+│   ├── fsq/
 │   └── dac_vae/
 ├── cosyvoice/          # Components from CosyVoice2
 │   ├── flow/
 │   ├── transformer/
 │   └── utils/
-├── train_dac_vae.py
 └── README.md
 ```
 
@@ -130,13 +129,13 @@ If you use this code in your research, please cite:
 
 This project follows the licensing terms of its dependencies:
 - CosyVoice2 components: [Check CosyVoice2 License](https://github.com/FunAudioLLM/CosyVoice/blob/main/LICENSE)
-- DAC components: [Apache 2.0 License](https://github.com/descriptinc/descript-audio-codec/blob/main/LICENSE)
+- FSQ components: [Apache 2.0 License](https://github.com/xingchensong/S3Tokenizer/blob/main/LICENSE)
 - Original contributions: [Specify your license here]
 
 ## Acknowledgments
 
 - **[CosyVoice2](https://github.com/FunAudioLLM/CosyVoice)**: This implementation extensively uses code and architectures from CosyVoice2
-- **[Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec)**: For the DAC implementation
+- **[FSQ](https://github.com/xingchensong/S3Tokenizer)**: For the FSQ implementation
 - **MiniMax team**: For the technical report and methodology
 - **FunAudioLLM team**: For the excellent CosyVoice2 codebase
 

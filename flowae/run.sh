@@ -1,2 +1,2 @@
 torchrun --nnodes=1 --nproc-per-node=1 run.py --config configs/experiments/dito-B-f8c4-noise-sync.yaml --save-root /mnt/nvme/dito
-torchrun --nnodes=1 --nproc-per-node=1 run.py --config configs/experiments/dito-B-audio.yaml --save-root /mnt/nvme/dito
+torchrun --nnodes=1 --nproc-per-node=1 run.py --config configs/experiments/dito-B-audio.yaml --save-root /mnt/nvme/ditogit ad

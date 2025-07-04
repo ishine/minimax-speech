@@ -6,11 +6,13 @@ from models import register
 @register('fm')
 class FM:
     
-    def __init__(self, sigma_min=1e-5, timescale=1.0):
+    def __init__(self, sigma_min=1e-5, timescale=1.0, use_immiscible=True, k_candidates=4):
         self.sigma_min = sigma_min
         self.prediction_type = None
         self.timescale = timescale
-    
+        self.use_immiscible = use_immiscible
+        self.k_candidates = k_candidates
+        
     def alpha(self, t):
         return 1.0 - t
     
@@ -22,6 +24,32 @@ class FM:
     
     def B(self, t):
         return -(1.0 - self.sigma_min)
+
+    def get_immiscible_noise(self, x, k=4):
+        """Generate noise using k-NN immiscible assignment"""
+        batch_size = x.shape[0]
+        
+        # Generate k noise candidates
+        noise_candidates = torch.randn(batch_size, k, *x.shape[1:], device=x.device)
+        
+        # Flatten for distance computation (use fp16 for efficiency)
+        x_flat = x.reshape(batch_size, -1).half()
+        noise_flat = noise_candidates.reshape(batch_size, k, -1).half()
+        
+        # Compute distances
+        distances = torch.norm(x_flat.unsqueeze(1) - noise_flat, dim=2)
+        
+        # Select closest noise
+        min_indices = distances.argmin(dim=1)
+        
+        # Gather selected noise
+        noise = torch.gather(
+            noise_candidates,
+            1,
+            min_indices.view(batch_size, 1, *([1] * (x.dim() - 1))).expand(-1, 1, *x.shape[1:])
+        ).squeeze(1)
+        
+        return noise
 
     def _get_reduction_dims(self, x):
         """Get appropriate dimensions for loss reduction based on tensor shape"""
@@ -42,7 +70,11 @@ class FM:
         return torch.zeros(n_timesteps) # Not VP and not supported
     
     def add_noise(self, x, t, noise=None):
-        noise = torch.randn_like(x) if noise is None else noise
+        if noise is None:
+            if self.use_immiscible:
+                noise = self.get_immiscible_noise(x, self.k_candidates)
+            else:
+                noise = torch.randn_like(x)
         s = [x.shape[0]] + [1] * (x.dim() - 1)
         x_t = self.alpha(t).view(*s) * x + self.sigma(t).view(*s) * noise
         return x_t, noise

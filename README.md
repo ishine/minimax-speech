@@ -13,7 +13,9 @@ This repository provides an implementation of the MiniMax-Speech model, featurin
 - **24kHz Audio Support**: High-quality audio generation at 24kHz sampling rate
 - **Two-Stage Architecture**: Optimized training pipeline with discrete and continuous representations
 - **Modular Design**: Separate components for audio codec and variational autoencoder
-- **CosyVoice2 Integration**: Leverages proven components from the CosyVoice2 framework
+- **CosyVoice2 Decoder**: Leverages proven components from the CosyVoice2's Decoder framework
+- **Flow matching AE**: Flow matching training for autoencoders
+- **Immiscible assignment**: Support immiscible adding noise while training
 
 ## Architecture
 

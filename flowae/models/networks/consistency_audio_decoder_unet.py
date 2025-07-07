@@ -274,9 +274,9 @@ class AudioDiffusionUNet(nn.Module):
                 size=x.shape[-1], 
                 mode='linear'  # or 'linear' for smoother interpolation
             )
-        
+        print('shape of z_proj: ', z_proj.shape)
         # Add latent conditioning to audio features
-        return x + z_proj
+        return torch.cat([x, z_proj], dim=1)
 
     def forward(self, x, t=None, z_dec=None) -> torch.Tensor:
         """
@@ -288,11 +288,13 @@ class AudioDiffusionUNet(nn.Module):
             z_dec: [batch, 64, n_frames] - latent conditioning (any length)
         """
         # Embed audio input
+        print('shape of x: ', x.shape, 'shape of z_dec: ', z_dec.shape)
         x = self.embed_audio(x)  # [batch, c0, samples]
-        
+        print('shape of x: ', x.shape)
         # Add latent conditioning
         if z_dec is not None:
             x = self.condition_with_latents(x, z_dec)
+        print('shape of x: ', x.shape)
 
         # Embed timestep
         if t is None:

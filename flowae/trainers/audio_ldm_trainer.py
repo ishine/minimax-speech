@@ -412,15 +412,30 @@ class AudioLDMTrainer(BaseTrainer):
             for i in range(min(signal.batch_size, 5)):  # Save up to 5 per batch
                 idx = int(os.environ['RANK']) + cnt * int(os.environ['WORLD_SIZE'])
                 if max_samples is None or idx < max_samples:
+                    tmp_recon = recons[i].audio_data.cpu().numpy()
+                    if tmp_recon.dim() == 3:
+                        tmp_recon = tmp_recon.squeeze(0)
+                    elif tmp_recon.dim() == 1:
+                        tmp_recon = tmp_recon.unsqueeze(0)
+                    tmp_recon = tmp_recon.T
+
+                    tmp_signal = signal[i].audio_data.cpu().numpy()
+                    if tmp_signal.dim() == 3:
+                        tmp_signal = tmp_signal.squeeze(0)
+                    elif tmp_signal.dim() == 1:
+                        tmp_signal = tmp_signal.unsqueeze(0)
+                    tmp_signal = tmp_signal.T
+
+                    
                     # Save as wav files
                     sf.write(
                         os.path.join(cache_gen_dir, f'{idx}.wav'),
-                        recons[i].audio_data.cpu().numpy().T,
+                        tmp_recon,
                         int(recons[i].sample_rate)
                     )
                     sf.write(
                         os.path.join(cache_gt_dir, f'{idx}.wav'),
-                        signal[i].audio_data.cpu().numpy().T,
+                        tmp_signal,
                         int(signal[i].sample_rate)
                     )
                 cnt += 1
@@ -493,14 +508,29 @@ class AudioLDMTrainer(BaseTrainer):
             for i in range(min(gt_signal.batch_size, 5)):
                 idx = int(os.environ['RANK']) + cnt * int(os.environ['WORLD_SIZE'])
                 if max_samples is None or idx < max_samples:
+                    tmp_recon = pred_signal[i].audio_data.cpu().numpy()
+                    if tmp_recon.dim() == 3:
+                        tmp_recon = tmp_recon.squeeze(0)
+                    elif tmp_recon.dim() == 1:
+                        tmp_recon = tmp_recon.unsqueeze(0)
+                    tmp_recon = tmp_recon.T
+
+                    tmp_signal = gt_signal[i].audio_data.cpu().numpy()
+                    if tmp_signal.dim() == 3:
+                        tmp_signal = tmp_signal.squeeze(0)
+                    elif tmp_signal.dim() == 1:
+                        tmp_signal = tmp_signal.unsqueeze(0)
+                    tmp_signal = tmp_signal.T
+
+
                     sf.write(
                         os.path.join(cache_gen_dir, f'{idx}.wav'),
-                        pred_signal[i].audio_data.cpu().numpy().T,
+                        tmp_recon,
                         int(pred_signal[i].sample_rate)
                     )
                     sf.write(
                         os.path.join(cache_gt_dir, f'{idx}.wav'),
-                        gt_signal[i].audio_data.cpu().numpy().T,
+                        tmp_signal,
                         int(gt_signal[i].sample_rate)
                     )
                 cnt += 1

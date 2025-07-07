@@ -12,6 +12,7 @@ class FM:
         self.timescale = timescale
         self.use_immiscible = use_immiscible
         self.k_candidates = k_candidates
+        print('use_immiscible: ', use_immiscible, 'k_candidates: ', k_candidates)   
         
     def alpha(self, t):
         return 1.0 - t

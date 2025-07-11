@@ -235,8 +235,8 @@ class Executor:
         info_dict["loss_dict"] = total_loss_dict
         log_per_save(writer, info_dict)
         model_name = (
-            "epoch_{}_whole".format(self.epoch)
+            f"epoch_{self.epoch}_whole"
             if on_batch_end
-            else "epoch_{}_step_{}".format(self.epoch, self.step + 1)
+            else f"epoch_{self.epoch}_step_{self.step + 1}"
         )
         save_model(model, model_name, info_dict)

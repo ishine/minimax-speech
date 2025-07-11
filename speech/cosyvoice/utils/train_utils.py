@@ -187,7 +187,7 @@ def init_optimizer_and_scheduler(args, configs, model, gan):
 
 
 def init_summarywriter(args):
-    
+    """Init summary writer"""    
     writer = None
     if int(os.environ.get('RANK', 0)) == 0:
         os.makedirs(args.model_dir, exist_ok=True)
@@ -196,6 +196,7 @@ def init_summarywriter(args):
 
 
 def save_model(model, model_name, info_dict):
+    """Save model"""
     rank = int(os.environ.get('RANK', 0))
     model_dir = info_dict["model_dir"]
     save_model_path = os.path.join(model_dir, '{}.pt'.format(model_name))
@@ -280,6 +281,7 @@ def batch_forward(model, batch, scaler, info_dict, ref_model=None, dpo_loss=None
 
 
 def batch_backward(model, scaler, info_dict):
+    """Backward batch"""
     if info_dict["train_engine"] == "deepspeed":
         scaled_loss = model.backward(info_dict['loss_dict']['loss'])    
     else:
@@ -294,6 +296,7 @@ def batch_backward(model, scaler, info_dict):
 
 
 def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict):
+    """Update parameters and learning rate"""
     grad_norm = 0.0
     if info_dict['train_engine'] == "deepspeed":
         info_dict["is_gradient_accumulation_boundary"] = model.is_gradient_accumulation_boundary()
@@ -326,6 +329,7 @@ def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict):
 
 
 def log_per_step(writer, info_dict):
+    """Log per step"""
     tag = info_dict["tag"]
     epoch = info_dict.get('epoch', 0)
     step = info_dict["step"]
@@ -338,23 +342,23 @@ def log_per_step(writer, info_dict):
         if (info_dict['train_engine'] == 'deepspeed' and info_dict['is_gradient_accumulation_boundary'] is True) or \
            (info_dict['train_engine'] == 'torch_ddp' and (info_dict['batch_idx'] + 1) % info_dict['accum_grad'] == 0):
             for k in ['epoch', 'lr', 'grad_norm']:
-                writer.add_scalar('{}/{}'.format(tag, k), info_dict[k], step + 1)
+                writer.add_scalar(f'{tag}/{k}', info_dict[k], step + 1)
             for k, v in loss_dict.items():
-                writer.add_scalar('{}/{}'.format(tag, k), v, step + 1)
+                writer.add_scalar(f'{tag}/{k}', v, step + 1)
 
     # TRAIN & CV, Shell log (stdout)
     if (info_dict['batch_idx'] + 1) % info_dict['log_interval'] == 0:
-        log_str = '{} Batch {}/{} '.format(tag, epoch, batch_idx + 1)
+        log_str = f'{tag} Batch {epoch}/{batch_idx + 1} '
         for name, value in loss_dict.items():
-            log_str += '{} {:.6f} '.format(name, value)
+            log_str += f'{name} {value:.6f} '
         if tag == "TRAIN":
-            log_str += 'lr {:.8f} grad_norm {:.6f}'.format(
-                info_dict["lr"], info_dict['grad_norm'])
-        log_str += ' rank {}'.format(rank)
+            log_str += f'lr {info_dict["lr"]:.8f} grad_norm {info_dict["grad_norm"]:.6f}'
+        log_str += f' rank {rank}'
         logging.debug(log_str)
 
 
 def log_per_save(writer, info_dict):
+    """Log per save"""
     tag = info_dict["tag"]
     epoch = info_dict["epoch"]
     step = info_dict["step"]
@@ -366,6 +370,6 @@ def log_per_save(writer, info_dict):
 
     if writer is not None:
         for k in ['epoch', 'lr']:
-            writer.add_scalar('{}/{}'.format(tag, k), info_dict[k], step + 1)
+            writer.add_scalar(f'{tag}/{k}', info_dict[k], step + 1)
         for k, v in loss_dict.items():
-            writer.add_scalar('{}/{}'.format(tag, k), v, step + 1)
+            writer.add_scalar(f'{tag}/{k}', v, step + 1)

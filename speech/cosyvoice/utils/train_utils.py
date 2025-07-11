@@ -29,7 +29,7 @@ import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
-
+from loguru import logger
 from deepspeed.runtime.zero.stage_1_and_2 import estimate_zero2_model_states_mem_needs_all_live
 
 from cosyvoice.dataset.dataset import Dataset
@@ -40,8 +40,7 @@ def init_distributed(args):
     world_size = int(os.environ.get('WORLD_SIZE', 1))
     local_rank = int(os.environ.get('LOCAL_RANK', 0))
     rank = int(os.environ.get('RANK', 0))
-    logging.info('training on multiple gpus, this gpu {}'.format(local_rank) +
-                 ', rank {}, world_size {}'.format(rank, world_size))
+    logger.info(f'training on multiple gpus, this gpu {local_rank}, rank {rank}, world_size {world_size}')
     if args.train_engine == 'torch_ddp':
         torch.cuda.set_device(local_rank)
         dist.init_process_group(args.dist_backend)
@@ -70,6 +69,7 @@ def init_dataset_and_dataloader(args, configs, gan, dpo):
 
 
 def check_modify_and_save_config(args, configs):
+    """Check and modify config"""
     if args.train_engine == "torch_ddp":
         configs['train_conf']["dtype"] = 'fp32'
     else:
@@ -92,6 +92,7 @@ def check_modify_and_save_config(args, configs):
 
 
 def wrap_cuda_model(args, model):
+    """Wrap model to cuda"""
     local_world_size = int(os.environ.get('LOCAL_WORLD_SIZE', 1))
     world_size = int(os.environ.get('WORLD_SIZE', 1))
     if args.train_engine == "torch_ddp":  # native pytorch ddp
@@ -109,6 +110,7 @@ def wrap_cuda_model(args, model):
 
 
 def init_optimizer_and_scheduler(args, configs, model, gan):
+    """Init optimizer and scheduler"""
     if gan is False:
         if configs['train_conf']['optim'] == 'adam':
             optimizer = optim.Adam(model.parameters(), **configs['train_conf']['optim_conf'])
@@ -185,6 +187,7 @@ def init_optimizer_and_scheduler(args, configs, model, gan):
 
 
 def init_summarywriter(args):
+    
     writer = None
     if int(os.environ.get('RANK', 0)) == 0:
         os.makedirs(args.model_dir, exist_ok=True)
@@ -215,6 +218,7 @@ def save_model(model, model_name, info_dict):
 
 
 def cosyvoice_join(group_join, info_dict):
+    """Join all ranks"""
     world_size = int(os.environ.get('WORLD_SIZE', 1))
     local_rank = int(os.environ.get('LOCAL_RANK', 0))
     rank = int(os.environ.get('RANK', 0))
@@ -236,6 +240,7 @@ def cosyvoice_join(group_join, info_dict):
 
 
 def batch_forward(model, batch, scaler, info_dict, ref_model=None, dpo_loss=None):
+    """ Forward batch and compute loss"""
     device = int(os.environ.get('LOCAL_RANK', 0))
 
     dtype = info_dict["dtype"]
@@ -276,7 +281,7 @@ def batch_forward(model, batch, scaler, info_dict, ref_model=None, dpo_loss=None
 
 def batch_backward(model, scaler, info_dict):
     if info_dict["train_engine"] == "deepspeed":
-        scaled_loss = model.backward(info_dict['loss_dict']['loss'])
+        scaled_loss = model.backward(info_dict['loss_dict']['loss'])    
     else:
         scaled_loss = info_dict['loss_dict']['loss'] / info_dict['accum_grad']
         if scaler is not None:
@@ -356,9 +361,8 @@ def log_per_save(writer, info_dict):
     loss_dict = info_dict["loss_dict"]
     lr = info_dict['lr']
     rank = int(os.environ.get('RANK', 0))
-    logging.info(
-        'Epoch {} Step {} CV info lr {} {} rank {}'.format(
-            epoch, step + 1, lr, rank, ' '.join(['{} {}'.format(k, v) for k, v in loss_dict.items()])))
+    logger.info(
+        f'Epoch {epoch} Step {step + 1} CV info lr {lr} {rank} {''.join([f"{k} {v}" for k, v in loss_dict.items()])}')
 
     if writer is not None:
         for k in ['epoch', 'lr']:

@@ -13,42 +13,63 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-from contextlib import nullcontext
 import os
+from contextlib import nullcontext
 
 import torch
 import torch.distributed as dist
+from cosyvoice.utils.train_utils import (batch_backward, batch_forward,
+                                         cosyvoice_join, log_per_save,
+                                         log_per_step, save_model,
+                                         update_parameter_and_lr)
 
-from cosyvoice.utils.train_utils import update_parameter_and_lr, log_per_step, log_per_save, batch_forward, batch_backward, save_model, cosyvoice_join
+from loguru import logger
 
 
 class Executor:
-
-    def __init__(self, gan: bool = False, ref_model: torch.nn.Module = None, dpo_loss: torch.nn.Module = None):
+    """Executor for training and cross validation"""
+    def __init__(
+        self,
+        gan: bool = False,
+        ref_model: torch.nn.Module = None,
+        dpo_loss: torch.nn.Module = None,
+    ):
         self.gan = gan
         self.ref_model = ref_model
         self.dpo_loss = dpo_loss
         self.step = 0
         self.epoch = 0
-        self.rank = int(os.environ.get('RANK', 0))
-        self.device = torch.device('cuda:{}'.format(self.rank))
+        self.rank = int(os.environ.get("RANK", 0))
+        self.device = torch.device(f"cuda:{self.rank}")
 
-    def train_one_epoc(self, model, optimizer, scheduler, train_data_loader, cv_data_loader, writer, info_dict, scaler, group_join, ref_model=None):
-        ''' Train one epoch
-        '''
+    def train_one_epoc(
+        self,
+        model,
+        optimizer,
+        scheduler,
+        train_data_loader,
+        cv_data_loader,
+        writer,
+        info_dict,
+        scaler,
+        group_join,
+    ):
+        """Train one epoch"""
 
-        lr = optimizer.param_groups[0]['lr']
-        logging.info('Epoch {} TRAIN info lr {} rank {}'.format(self.epoch, lr, self.rank))
-        logging.info('using accumulate grad, new batch size is {} times'
-                     ' larger than before'.format(info_dict['accum_grad']))
-        # A context manager to be used in conjunction with an instance of
-        # torch.nn.parallel.DistributedDataParallel to be able to train
-        # with uneven inputs across participating processes.
+        lr = optimizer.param_groups[0]["lr"]
+        logger.info(
+            f"Epoch {self.epoch} TRAIN info lr {lr} rank {self.rank}"
+        )
+        logger.info(
+            f"using accumulate grad, new batch size is {info_dict['accum_grad']} times larger than before"
+        )
+       
         model.train()
         if self.ref_model is not None:
             self.ref_model.eval()
-        model_context = model.join if info_dict['train_engine'] == 'torch_ddp' else nullcontext
+        model_context = (
+            model.join if info_dict["train_engine"] == "torch_ddp" else nullcontext
+        )
         with model_context():
             for batch_idx, batch_dict in enumerate(train_data_loader):
                 info_dict["tag"] = "TRAIN"
@@ -58,47 +79,77 @@ class Executor:
                 if cosyvoice_join(group_join, info_dict):
                     break
 
-                # Disable gradient synchronizations across DDP processes.
-                # Within this context, gradients will be accumulated on module
-                # variables, which will later be synchronized.
-                if info_dict['train_engine'] == 'torch_ddp' and (batch_idx + 1) % info_dict["accum_grad"] != 0:
+               
+                if (
+                    info_dict["train_engine"] == "torch_ddp"
+                    and (batch_idx + 1) % info_dict["accum_grad"] != 0
+                ):
                     context = model.no_sync
-                # Used for single gpu training and DDP gradient synchronization
-                # processes.
+            
                 else:
                     context = nullcontext
 
                 with context():
-                    info_dict = batch_forward(model, batch_dict, scaler, info_dict, ref_model=self.ref_model, dpo_loss=self.dpo_loss)
+                    info_dict = batch_forward(
+                        model,
+                        batch_dict,
+                        scaler,
+                        info_dict,
+                        ref_model=self.ref_model,
+                        dpo_loss=self.dpo_loss,
+                    )
                     info_dict = batch_backward(model, scaler, info_dict)
 
-                info_dict = update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict)
+                info_dict = update_parameter_and_lr(
+                    model, optimizer, scheduler, scaler, info_dict
+                )
                 log_per_step(writer, info_dict)
                 # NOTE specify save_per_step in cosyvoice.yaml if you want to enable step save
-                if info_dict['save_per_step'] > 0 and (self.step + 1) % info_dict['save_per_step'] == 0 and \
-                   (batch_idx + 1) % info_dict["accum_grad"] == 0:
+                if (
+                    info_dict["save_per_step"] > 0
+                    and (self.step + 1) % info_dict["save_per_step"] == 0
+                    and (batch_idx + 1) % info_dict["accum_grad"] == 0
+                ):
                     dist.barrier()
-                    self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=False)
+                    self.cv(
+                        model, cv_data_loader, writer, info_dict, on_batch_end=False
+                    )
                     model.train()
                 if (batch_idx + 1) % info_dict["accum_grad"] == 0:
                     self.step += 1
         dist.barrier()
         self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=True)
 
-    def train_one_epoc_gan(self, model, optimizer, scheduler, optimizer_d, scheduler_d, train_data_loader, cv_data_loader,
-                           writer, info_dict, scaler, group_join):
-        ''' Train one epoch
-        '''
+    def train_one_epoc_gan(
+        self,
+        model,
+        optimizer,
+        scheduler,
+        optimizer_d,
+        scheduler_d,
+        train_data_loader,
+        cv_data_loader,
+        writer,
+        info_dict,
+        scaler,
+        group_join,
+    ):
+        """Train one epoch"""
 
-        lr = optimizer.param_groups[0]['lr']
-        logging.info('Epoch {} TRAIN info lr {} rank {}'.format(self.epoch, lr, self.rank))
-        logging.info('using accumulate grad, new batch size is {} times'
-                     ' larger than before'.format(info_dict['accum_grad']))
+        lr = optimizer.param_groups[0]["lr"]
+        logger.info(
+            f"Epoch {self.epoch} TRAIN info lr {lr} rank {self.rank}"
+        )
+        logger.info(
+            f"using accumulate grad, new batch size is {info_dict['accum_grad']} times larger than before"
+        )
         # A context manager to be used in conjunction with an instance of
         # torch.nn.parallel.DistributedDataParallel to be able to train
         # with uneven inputs across participating processes.
         model.train()
-        model_context = model.join if info_dict['train_engine'] == 'torch_ddp' else nullcontext
+        model_context = (
+            model.join if info_dict["train_engine"] == "torch_ddp" else nullcontext
+        )
         with model_context():
             for batch_idx, batch_dict in enumerate(train_data_loader):
                 info_dict["tag"] = "TRAIN"
@@ -111,7 +162,10 @@ class Executor:
                 # Disable gradient synchronizations across DDP processes.
                 # Within this context, gradients will be accumulated on module
                 # variables, which will later be synchronized.
-                if info_dict['train_engine'] == 'torch_ddp' and (batch_idx + 1) % info_dict["accum_grad"] != 0:
+                if (
+                    info_dict["train_engine"] == "torch_ddp"
+                    and (batch_idx + 1) % info_dict["accum_grad"] != 0
+                ):
                     context = model.no_sync
                 # Used for single gpu training and DDP gradient synchronization
                 # processes.
@@ -119,35 +173,43 @@ class Executor:
                     context = nullcontext
 
                 with context():
-                    batch_dict['turn'] = 'discriminator'
+                    batch_dict["turn"] = "discriminator"
                     info_dict = batch_forward(model, batch_dict, scaler, info_dict)
                     info_dict = batch_backward(model, scaler, info_dict)
-                info_dict = update_parameter_and_lr(model, optimizer_d, scheduler_d, scaler, info_dict)
+                info_dict = update_parameter_and_lr(
+                    model, optimizer_d, scheduler_d, scaler, info_dict
+                )
                 optimizer.zero_grad()
                 log_per_step(writer, info_dict)
                 with context():
-                    batch_dict['turn'] = 'generator'
+                    batch_dict["turn"] = "generator"
                     info_dict = batch_forward(model, batch_dict, scaler, info_dict)
                     info_dict = batch_backward(model, scaler, info_dict)
-                info_dict = update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict)
+                info_dict = update_parameter_and_lr(
+                    model, optimizer, scheduler, scaler, info_dict
+                )
                 optimizer_d.zero_grad()
                 log_per_step(writer, info_dict)
                 # NOTE specify save_per_step in cosyvoice.yaml if you want to enable step save
-                if info_dict['save_per_step'] > 0 and (self.step + 1) % info_dict['save_per_step'] == 0 and \
-                   (batch_idx + 1) % info_dict["accum_grad"] == 0:
+                if (
+                    info_dict["save_per_step"] > 0
+                    and (self.step + 1) % info_dict["save_per_step"] == 0
+                    and (batch_idx + 1) % info_dict["accum_grad"] == 0
+                ):
                     dist.barrier()
-                    self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=False)
+                    self.cv(
+                        model, cv_data_loader, writer, info_dict, on_batch_end=False
+                    )
                     model.train()
                 if (batch_idx + 1) % info_dict["accum_grad"] == 0:
                     self.step += 1
         dist.barrier()
-        self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=True)
+        # self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=True)
 
     @torch.inference_mode()
     def cv(self, model, cv_data_loader, writer, info_dict, on_batch_end=True):
-        ''' Cross validation on
-        '''
-        logging.info('Epoch {} Step {} on_batch_end {} CV rank {}'.format(self.epoch, self.step + 1, on_batch_end, self.rank))
+        """Cross validation on"""
+        logger.info(f"Epoch {self.epoch} Step {self.step + 1} on_batch_end {on_batch_end} CV rank {self.rank}")
         model.eval()
         total_num_utts, total_loss_dict = 0, {}  # avoid division by 0
         for batch_idx, batch_dict in enumerate(cv_data_loader):
@@ -160,17 +222,21 @@ class Executor:
             total_num_utts += num_utts
 
             if self.gan is True:
-                batch_dict['turn'] = 'generator'
+                batch_dict["turn"] = "generator"
             info_dict = batch_forward(model, batch_dict, None, info_dict)
 
-            for k, v in info_dict['loss_dict'].items():
+            for k, v in info_dict["loss_dict"].items():
                 if k not in total_loss_dict:
                     total_loss_dict[k] = []
                 total_loss_dict[k].append(v.item() * num_utts)
             log_per_step(None, info_dict)
         for k, v in total_loss_dict.items():
             total_loss_dict[k] = sum(v) / total_num_utts
-        info_dict['loss_dict'] = total_loss_dict
+        info_dict["loss_dict"] = total_loss_dict
         log_per_save(writer, info_dict)
-        model_name = 'epoch_{}_whole'.format(self.epoch) if on_batch_end else 'epoch_{}_step_{}'.format(self.epoch, self.step + 1)
+        model_name = (
+            "epoch_{}_whole".format(self.epoch)
+            if on_batch_end
+            else "epoch_{}_step_{}".format(self.epoch, self.step + 1)
+        )
         save_model(model, model_name, info_dict)

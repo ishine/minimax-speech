@@ -26,15 +26,14 @@ import deepspeed
 import torch.optim as optim
 import torch.distributed as dist
 
-from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
 from loguru import logger
 from deepspeed.runtime.zero.stage_1_and_2 import estimate_zero2_model_states_mem_needs_all_live
 
 from cosyvoice.dataset.dataset import Dataset
-from cosyvoice.utils.scheduler import WarmupLR, NoamHoldAnnealing, ConstantLR
 
+from torch.optim.lr_scheduler import LinearLR, ConstantLR, SequentialLR
 
 def init_distributed(args):
     world_size = int(os.environ.get('WORLD_SIZE', 1))
@@ -49,10 +48,10 @@ def init_distributed(args):
     return world_size, local_rank, rank
 
 
-def init_dataset_and_dataloader(args, configs, gan, dpo):
-    data_pipeline = configs['data_pipeline_gan'] if gan is True else configs['data_pipeline']
-    train_dataset = Dataset(args.train_data, data_pipeline=data_pipeline, mode='train', gan=gan, dpo=dpo, shuffle=True, partition=True)
-    cv_dataset = Dataset(args.cv_data, data_pipeline=data_pipeline, mode='train', gan=gan, dpo=dpo, shuffle=False, partition=False)
+def init_dataset_and_dataloader(args, configs, dpo):
+    data_pipeline = configs['data_pipeline']
+    train_dataset = Dataset(args.train_data, data_pipeline=data_pipeline, mode='train', gan=False, dpo=dpo, shuffle=True, partition=True)
+    cv_dataset = Dataset(args.cv_data, data_pipeline=data_pipeline, mode='train', gan=False, dpo=dpo, shuffle=False, partition=False)
 
     # do not use persistent_workers=True, as whisper tokenizer opens tiktoken file each time when the for loop starts
     train_data_loader = DataLoader(train_dataset,
@@ -109,90 +108,38 @@ def wrap_cuda_model(args, model):
     return model
 
 
-def init_optimizer_and_scheduler(args, configs, model, gan):
+def init_optimizer_and_scheduler(configs, model):
     """Init optimizer and scheduler"""
-    if gan is False:
-        if configs['train_conf']['optim'] == 'adam':
-            optimizer = optim.Adam(model.parameters(), **configs['train_conf']['optim_conf'])
-        elif configs['train_conf']['optim'] == 'adamw':
-            optimizer = optim.AdamW(model.parameters(), **configs['train_conf']['optim_conf'])
-        else:
-            raise ValueError("unknown optimizer: " + configs['train_conf'])
-
-        if configs['train_conf']['scheduler'] == 'warmuplr':
-            scheduler_type = WarmupLR
-            scheduler = WarmupLR(optimizer, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler'] == 'NoamHoldAnnealing':
-            scheduler_type = NoamHoldAnnealing
-            scheduler = NoamHoldAnnealing(optimizer, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler'] == 'constantlr':
-            scheduler_type = ConstantLR
-            scheduler = ConstantLR(optimizer)
-        else:
-            raise ValueError("unknown scheduler: " + configs['train_conf'])
-
-        # use deepspeed optimizer for speedup
-        if args.train_engine == "deepspeed":
-            def scheduler(opt):
-                return scheduler_type(opt, **configs['train_conf']['scheduler_conf'])
-            model, optimizer, _, scheduler = deepspeed.initialize(
-                args=args,
-                model=model,
-                optimizer=None,
-                lr_scheduler=scheduler,
-                model_parameters=model.parameters())
-
-        optimizer_d, scheduler_d = None, None
-
+    if configs['train_conf']['optim'] == 'adam':
+        optimizer = optim.Adam(model.parameters(), **configs['train_conf']['optim_conf'])
+    elif configs['train_conf']['optim'] == 'adamw':
+        optimizer = optim.AdamW(model.parameters(), **configs['train_conf']['optim_conf'])
     else:
-        # currently we wrap generator and discriminator in one model, so we cannot use deepspeed
-        if configs['train_conf']['optim'] == 'adam':
-            optimizer = optim.Adam(model.module.generator.parameters(), **configs['train_conf']['optim_conf'])
-        elif configs['train_conf']['optim'] == 'adamw':
-            optimizer = optim.AdamW(model.module.generator.parameters(), **configs['train_conf']['optim_conf'])
-        else:
-            raise ValueError("unknown optimizer: " + configs['train_conf'])
+        raise ValueError("unknown optimizer: " + configs['train_conf'])
 
-        if configs['train_conf']['scheduler'] == 'warmuplr':
-            scheduler_type = WarmupLR
-            scheduler = WarmupLR(optimizer, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler'] == 'NoamHoldAnnealing':
-            scheduler_type = NoamHoldAnnealing
-            scheduler = NoamHoldAnnealing(optimizer, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler'] == 'constantlr':
-            scheduler_type = ConstantLR
-            scheduler = ConstantLR(optimizer)
-        else:
-            raise ValueError("unknown scheduler: " + configs['train_conf'])
+    # Create schedulers
+    warmup_scheduler = LinearLR(
+        optimizer,
+        start_factor=1e-9,  # Start at nearly 0
+        end_factor=1.0,     # End at base learning rate
+        total_iters=5000    # 5k warmup steps
+    )
+    
+    constant_scheduler = ConstantLR(
+        optimizer,
+        factor=1.0,  # Keep learning rate constant
+        total_iters=float('inf')  # Run indefinitely
+    )
+    
+    # Combine schedulers: warmup for 5k steps, then constant
+    scheduler = SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, constant_scheduler],
+        milestones=[5000]  # Switch after 5k steps
+    )
 
-        if configs['train_conf']['optim_d'] == 'adam':
-            optimizer_d = optim.Adam(model.module.discriminator.parameters(), **configs['train_conf']['optim_conf'])
-        elif configs['train_conf']['optim_d'] == 'adamw':
-            optimizer_d = optim.AdamW(model.module.discriminator.parameters(), **configs['train_conf']['optim_conf'])
-        else:
-            raise ValueError("unknown optimizer: " + configs['train_conf'])
+    return model, optimizer, scheduler
 
-        if configs['train_conf']['scheduler_d'] == 'warmuplr':
-            scheduler_type = WarmupLR
-            scheduler_d = WarmupLR(optimizer_d, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler_d'] == 'NoamHoldAnnealing':
-            scheduler_type = NoamHoldAnnealing
-            scheduler_d = NoamHoldAnnealing(optimizer_d, **configs['train_conf']['scheduler_conf'])
-        elif configs['train_conf']['scheduler'] == 'constantlr':
-            scheduler_type = ConstantLR
-            scheduler_d = ConstantLR(optimizer_d)
-        else:
-            raise ValueError("unknown scheduler: " + configs['train_conf'])
-    return model, optimizer, scheduler, optimizer_d, scheduler_d
-
-
-def init_summarywriter(args):
-    """Init summary writer"""    
-    writer = None
-    if int(os.environ.get('RANK', 0)) == 0:
-        os.makedirs(args.model_dir, exist_ok=True)
-        writer = SummaryWriter(args.tensorboard_dir)
-    return writer
 
 
 def save_model(model, model_name, info_dict):
@@ -295,21 +242,87 @@ def batch_backward(model, scaler, info_dict):
     return info_dict
 
 
-def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict):
+def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict, model_type='llm'):
     """Update parameters and learning rate"""
+
+    #Define key components based on model type
+    if model_type == 'llm':
+        key_components = {
+            # Text processing components
+            'text_embedding': [],
+            'text_encoder': [],
+            'text_encoder_affine': [],
+            
+            # LLM core components
+            'llm_embedding': [],
+            'llm.model': [],  # Qwen2 model layers
+            'llm_decoder': [],
+            
+            # Speech components
+            'speech_embedding': [],
+            'spk_embed_affine': [],
+            
+            # Other components
+            'other': []
+        }
+    elif model_type == 'flow':
+        key_components = {
+            # Input processing
+            'input_embedding': [],
+            'spk_embed_affine': [],
+            
+            # Encoder components
+            'encoder': [],
+            'encoder_proj': [],
+            
+            # Flow/Diffusion components
+            'decoder.cfm': [],  # Conditional Flow Matching
+            'decoder.unet': [],  # UNet backbone
+            'decoder.estimator': [],  # Score/velocity estimator
+            'decoder.time_embedding': [],  # Time embeddings
+            'decoder.conv': [],  # Convolutional layers
+            'decoder.attention': [],  # Attention layers
+            
+            # Length regulation
+            'length_regulator': [],
+            
+            # Other components
+            'other': []
+        }
+
     grad_norm = 0.0
-    if info_dict['train_engine'] == "deepspeed":
-        info_dict["is_gradient_accumulation_boundary"] = model.is_gradient_accumulation_boundary()
-        model.step()
-        grad_norm = model.get_global_grad_norm()
-    elif (info_dict['batch_idx'] + 1) % info_dict["accum_grad"] == 0:
+    layer_grad_norms = {}
+
+    if (info_dict['batch_idx'] + 1) % info_dict["accum_grad"] == 0:
+
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                # Calculate gradient norm for this parameter
+                param_grad_norm = param.grad.data.norm(2).item()
+                layer_grad_norms[name] = param_grad_norm
+                
+                # Categorize into key components
+                categorized = False
+                for component_key in key_components:
+                    if component_key != 'other':
+                        # Special handling for decoder sub-components in flow models
+                        if model_type == 'flow' and component_key.startswith('decoder.'):
+                            component_pattern = component_key.replace('decoder.', '')
+                            if 'decoder' in name and component_pattern in name:
+                                key_components[component_key].append((name, param_grad_norm))
+                                categorized = True
+                                break
+                        elif component_key in name:
+                            key_components[component_key].append((name, param_grad_norm))
+                            categorized = True
+                            break
+                if not categorized:
+                    key_components['other'].append((name, param_grad_norm))
+
         # Use mixed precision training
         if scaler is not None:
             scaler.unscale_(optimizer)
             grad_norm = clip_grad_norm_(model.parameters(), info_dict['grad_clip'])
-            # We don't check grad here since that if the gradient
-            # has inf/nan values, scaler.step will skip
-            # optimizer.step().
             if torch.isfinite(grad_norm):
                 scaler.step(optimizer)
             else:
@@ -325,11 +338,12 @@ def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict):
         scheduler.step()
     info_dict["lr"] = optimizer.param_groups[0]['lr']
     info_dict["grad_norm"] = grad_norm
+    info_dict["layer_grad_norms"] = layer_grad_norms
+    info_dict["key_component_grads"] = key_components
     return info_dict
 
-
-def log_per_step(writer, info_dict):
-    """Log per step"""
+def log_per_step(experiment, info_dict):
+    """Log per step using Comet ML"""
     tag = info_dict["tag"]
     epoch = info_dict.get('epoch', 0)
     step = info_dict["step"]
@@ -337,39 +351,61 @@ def log_per_step(writer, info_dict):
     loss_dict = info_dict['loss_dict']
     rank = int(os.environ.get('RANK', 0))
 
-    # only rank 0 write to tensorboard to avoid multi-process write
-    if writer is not None:
+    # Only rank 0 writes to Comet ML to avoid multi-process write
+    if experiment is not None and rank == 0:
         if (info_dict['train_engine'] == 'deepspeed' and info_dict['is_gradient_accumulation_boundary'] is True) or \
            (info_dict['train_engine'] == 'torch_ddp' and (info_dict['batch_idx'] + 1) % info_dict['accum_grad'] == 0):
-            for k in ['epoch', 'lr', 'grad_norm']:
-                writer.add_scalar(f'{tag}/{k}', info_dict[k], step + 1)
+            # Log metrics to Comet ML
+            experiment.log_metric(f'{tag}_epoch', info_dict['epoch'], step=step + 1)
+            experiment.log_metric(f'{tag}_lr', info_dict['lr'], step=step + 1)
+            experiment.log_metric(f'{tag}_grad_norm', info_dict['grad_norm'], step=step + 1)
+            
+            # Log all losses
             for k, v in loss_dict.items():
-                writer.add_scalar(f'{tag}/{k}', v, step + 1)
+                if isinstance(v, torch.Tensor):
+                    v = v.item()
+                experiment.log_metric(f'{tag}_{k}', v, step=step + 1)
 
     # TRAIN & CV, Shell log (stdout)
     if (info_dict['batch_idx'] + 1) % info_dict['log_interval'] == 0:
         log_str = f'{tag} Batch {epoch}/{batch_idx + 1} '
         for name, value in loss_dict.items():
+            if isinstance(value, torch.Tensor):
+                value = value.item()
             log_str += f'{name} {value:.6f} '
         if tag == "TRAIN":
             log_str += f'lr {info_dict["lr"]:.8f} grad_norm {info_dict["grad_norm"]:.6f}'
         log_str += f' rank {rank}'
         logging.debug(log_str)
 
-
-def log_per_save(writer, info_dict):
-    """Log per save"""
+def log_per_save(experiment, info_dict):
+    """Log per save using Comet ML"""
     tag = info_dict["tag"]
     epoch = info_dict["epoch"]
     step = info_dict["step"]
     loss_dict = info_dict["loss_dict"]
     lr = info_dict['lr']
     rank = int(os.environ.get('RANK', 0))
-    logger.info(
-        f'Epoch {epoch} Step {step + 1} CV info lr {lr} {rank} {''.join([f"{k} {v}" for k, v in loss_dict.items()])}')
+    
+    # Create loss string for logging
+    loss_str = ' '.join([f"{k} {v.item() if isinstance(v, torch.Tensor) else v}" for k, v in loss_dict.items()])
+    logger.info(f'Epoch {epoch} Step {step + 1} CV info lr {lr} {rank} {loss_str}')
 
-    if writer is not None:
-        for k in ['epoch', 'lr']:
-            writer.add_scalar(f'{tag}/{k}', info_dict[k], step + 1)
+    if experiment is not None and rank == 0:
+        # Log metrics to Comet ML
+        experiment.log_metric(f'{tag}_epoch', info_dict['epoch'], step=step + 1)
+        experiment.log_metric(f'{tag}_lr', info_dict['lr'], step=step + 1)
+        
+        # Log all losses
         for k, v in loss_dict.items():
-            writer.add_scalar(f'{tag}/{k}', v, step + 1)
+            if isinstance(v, torch.Tensor):
+                v = v.item()
+            experiment.log_metric(f'{tag}_{k}', v, step=step + 1)
+        
+        # Log additional validation info
+        if tag == "CV":
+            # Calculate average CV loss for the epoch
+            avg_loss = loss_dict.get('loss', 0)
+            if isinstance(avg_loss, torch.Tensor):
+                avg_loss = avg_loss.item()
+            experiment.log_metric('cv_avg_loss_per_epoch', avg_loss, epoch=epoch)

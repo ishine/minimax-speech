@@ -16,9 +16,6 @@ from __future__ import print_function
 
 import argparse
 import datetime
-import logging
-
-logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import os
 from copy import deepcopy
 
@@ -29,6 +26,7 @@ from hyperpyyaml import load_hyperpyyaml
 from loguru import logger
 from torch.distributed.elastic.multiprocessing.errors import record
 
+from comet_ml import Experiment
 from cosyvoice.utils.executor import Executor
 from cosyvoice.utils.losses import DPOLoss
 from cosyvoice.utils.train_utils import (check_modify_and_save_config,
@@ -109,20 +107,61 @@ def get_args():
     return args
 
 
+def init_comet_experiment(args, configs):
+    """Initialize Comet ML experiment"""
+    rank = int(os.environ.get('RANK', 0))
+    
+    # Only create experiment on rank 0 to avoid duplicates
+    if rank == 0 and not args.comet_disabled:
+        # Set up Comet ML experiment
+        experiment = Experiment(
+            api_key=args.comet_api_key,
+            project_name=args.comet_project,
+            workspace=args.comet_workspace,
+            experiment_name=args.comet_experiment_name,
+            disabled=args.comet_disabled,
+            offline=args.comet_offline,
+            auto_metric_logging=True,
+            auto_param_logging=True,
+            auto_histogram_weight_logging=True,
+            auto_histogram_gradient_logging=True,
+            auto_histogram_activation_logging=False,
+        )
+        
+        # Log hyperparameters
+        experiment.log_parameters(configs["train_conf"])
+        experiment.log_parameter("model_type", args.model)
+        experiment.log_parameter("train_data", args.train_data)
+        experiment.log_parameter("cv_data", args.cv_data)
+        experiment.log_parameter("use_amp", args.use_amp)
+        experiment.log_parameter("dpo", args.dpo)
+        experiment.log_parameter("num_workers", args.num_workers)
+        experiment.log_parameter("prefetch", args.prefetch)
+        
+        # Log model architecture if available
+        if args.model in configs:
+            model_config = configs[args.model].__dict__ if hasattr(configs[args.model], '__dict__') else {}
+            experiment.log_parameters(model_config, prefix=f"{args.model}/")
+        
+        # Add tags
+        experiment.add_tag(args.model)
+        if args.dpo:
+            experiment.add_tag("dpo")
+        if args.use_amp:
+            experiment.add_tag("amp")
+            
+        logger.info(f"Comet ML experiment initialized: {experiment.get_name()}")
+        return experiment
+    else:
+        return None
+
 @record
 def main():
     args = get_args()
-    logging.basicConfig(
-        level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s"
-    )
-    # gan train has some special initialization logic
-    gan = True if args.model == "hifigan" else False
 
     override_dict = {
         k: None for k in ["llm", "flow", "hift", "hifigan"] if k != args.model
     }
-    if gan is True:
-        override_dict.pop("hift")
     try:
         with open(args.config, "r", encoding="utf-8") as f:
             configs = load_hyperpyyaml(
@@ -136,23 +175,27 @@ def main():
         logger.error(f"Error loading config: {e}")
         with open(args.config, "r", encoding="utf-8") as f:
             configs = load_hyperpyyaml(f, overrides=override_dict)
-    if gan is True:
-        configs["train_conf"] = configs["train_conf_gan"]
+
     configs["train_conf"].update(vars(args))
 
-    # Init env for ddp
-    init_distributed(args)
+    world_size = int(os.environ.get('WORLD_SIZE', 1))
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    rank = int(os.environ.get('RANK', 0))
+    logger.info(f'training on multiple gpus, this gpu {local_rank}, rank {rank}, world_size {world_size}')
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(args.dist_backend)
 
     # Get dataset & dataloader
     train_dataset, _, train_data_loader, cv_data_loader = init_dataset_and_dataloader(
-        args, configs, gan, args.dpo
+        args, configs, args.dpo
     )
 
     # Do some sanity checks and save config to arsg.model_dir
     configs = check_modify_and_save_config(args, configs)
 
     # Tensorboard summary
-    writer = init_summarywriter(args)
+    experiment = init_comet_experiment(args, configs)
+
 
     # load checkpoint
     if args.dpo is True:
@@ -168,6 +211,11 @@ def main():
                 start_step = state_dict["step"]
             if "epoch" in state_dict:
                 start_epoch = state_dict["epoch"]
+            # Log checkpoint info to Comet
+            if experiment:
+                experiment.log_parameter("checkpoint", args.checkpoint)
+                experiment.log_parameter("start_step", start_step)
+                experiment.log_parameter("start_epoch", start_epoch)
         else:
             logger.warning(f"checkpoint {args.checkpoint} do not exsist!")
 
@@ -178,18 +226,24 @@ def main():
     )
 
     # Get optimizer & scheduler
-    model, optimizer, scheduler, optimizer_d, scheduler_d = (
-        init_optimizer_and_scheduler(args, configs, model, gan)
+    model, optimizer, scheduler = (
+        init_optimizer_and_scheduler(configs, model)
     )
     scheduler.set_step(start_step)
-    if scheduler_d is not None:
-        scheduler_d.set_step(start_step)
 
     # Save init checkpoints
     info_dict = deepcopy(configs["train_conf"])
     info_dict["step"] = start_step
     info_dict["epoch"] = start_epoch
     save_model(model, "init", info_dict)
+
+    # Log model save to Comet
+    if experiment:
+        experiment.log_model(
+            name=f"{args.model}_init",
+            file_or_folder=os.path.join(args.model_dir, "init.pt"),
+            metadata=info_dict
+        )
 
     # DPO related
     if args.dpo is True:
@@ -201,11 +255,16 @@ def main():
         ref_model = torch.nn.parallel.DistributedDataParallel(
             ref_model, find_unused_parameters=True
         )
+        if experiment:
+            experiment.log_parameter("ref_model", args.ref_model)
+            experiment.log_parameter("dpo_beta", 0.01)
+            experiment.log_parameter("dpo_label_smoothing", 0.0)
+            experiment.log_parameter("dpo_ipo", False)
     else:
         ref_model, dpo_loss = None, None
 
     # Get executor
-    executor = Executor(gan=gan, ref_model=ref_model, dpo_loss=dpo_loss)
+    executor = Executor(gan=False, ref_model=ref_model, dpo_loss=dpo_loss)
     executor.step = start_step
 
     # Init scaler, used for pytorch amp mixed precision training
@@ -220,34 +279,22 @@ def main():
         group_join = dist.new_group(
             backend="nccl", timeout=datetime.timedelta(seconds=args.timeout)
         )
-        if gan is True:
-            executor.train_one_epoc_gan(
-                model,
-                optimizer,
-                scheduler,
-                optimizer_d,
-                scheduler_d,
-                train_data_loader,
-                cv_data_loader,
-                writer,
-                info_dict,
-                scaler,
-                group_join,
-            )
-        else:
-            executor.train_one_epoc(
-                model,
-                optimizer,
-                scheduler,
-                train_data_loader,
-                cv_data_loader,
-                writer,
-                info_dict,
-                scaler,
-                group_join,
-            )
+        
+        executor.train_one_epoc(
+            model,
+            optimizer,
+            scheduler,
+            train_data_loader,
+            cv_data_loader,
+            experiment,
+            info_dict,
+            scaler,
+            group_join,
+            model_type=args.model
+        )
         dist.destroy_process_group(group_join)
-
+    if experiment:
+        experiment.end()
 
 if __name__ == "__main__":
     main()

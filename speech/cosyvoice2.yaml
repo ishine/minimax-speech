@@ -129,6 +129,9 @@ hifigan: !new:cosyvoice.hifigan.hifigan.HiFiGan
         !ref <mel_spec_transform1>
     ]
 
+individual_file_opener: !name:cosyvoice.dataset.processor.individual_file_opener
+
+
 # processor functions
 parquet_opener: !name:cosyvoice.dataset.processor.parquet_opener
 get_tokenizer: !name:cosyvoice.tokenizer.tokenizer.get_qwen_tokenizer
@@ -176,25 +179,11 @@ padding: !name:cosyvoice.dataset.processor.padding
 
 # dataset processor pipeline
 data_pipeline: [
-    !ref <parquet_opener>,
+    !ref <individual_file_opener>,
     !ref <tokenize>,
     !ref <filter>,
     !ref <resample>,
     !ref <compute_fbank>,
-    !ref <parse_embedding>,
-    !ref <shuffle>,
-    !ref <sort>,
-    !ref <batch>,
-    !ref <padding>,
-]
-data_pipeline_gan: [
-    !ref <parquet_opener>,
-    !ref <tokenize>,
-    !ref <filter>,
-    !ref <resample>,
-    !ref <truncate>,
-    !ref <compute_fbank>,
-    !ref <compute_f0>,
     !ref <parse_embedding>,
     !ref <shuffle>,
     !ref <sort>,

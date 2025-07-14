@@ -73,6 +73,10 @@ flow: !new:cosyvoice.flow.flow.CausalMaskedDiffWithXvec
                 training_cfg_rate: 0.2
                 inference_cfg_rate: 0.7
                 reg_loss_type: 'l1'
+                use_immiscible: True
+                immiscible_k: 8
+                use_contrastive_fm: True
+                contrastive_lambda: 0.05
         estimator: !new:cosyvoice.flow.decoder.CausalConditionalDecoder
             in_channels: 320
             out_channels: 80
@@ -161,6 +165,7 @@ feat_extractor: !name:matcha.utils.audio.mel_spectrogram
     center: False
 compute_fbank: !name:cosyvoice.dataset.processor.compute_fbank
     feat_extractor: !ref <feat_extractor>
+    token_mel_ratio: !ref <token_mel_ratio>
 compute_f0: !name:cosyvoice.dataset.processor.compute_f0
     sample_rate: !ref <sample_rate>
     hop_size: 480
@@ -172,7 +177,7 @@ sort: !name:cosyvoice.dataset.processor.sort
     sort_size: 500  # sort_size should be less than shuffle_size
 batch: !name:cosyvoice.dataset.processor.batch
     batch_type: 'dynamic'
-    max_frames_in_batch: 2000
+    max_frames_in_batch: 25000
 padding: !name:cosyvoice.dataset.processor.padding
     use_spk_embedding: False # change to True during sft
 
@@ -195,12 +200,12 @@ data_pipeline: [
 train_conf:
     optim: adamw
     optim_conf:
-        lr: 1e-5 # change to 1e-5 during sft
+        lr: 2e-6 # change to 1e-5 during sft
     scheduler: constantlr # change to constantlr during sft
     scheduler_conf:
         warmup_steps: 2500
     max_epoch: 200
     grad_clip: 1
     accum_grad: 1
-    log_interval: 100
+    log_interval: 5
     save_per_step: -1

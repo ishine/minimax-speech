@@ -33,6 +33,7 @@ class Executor:
         gan: bool = False,
         ref_model: torch.nn.Module = None,
         dpo_loss: torch.nn.Module = None,
+        use_contrastive_fm: bool = False
     ):
         self.gan = gan
         self.ref_model = ref_model
@@ -41,6 +42,7 @@ class Executor:
         self.epoch = 0
         self.rank = int(os.environ.get("RANK", 0))
         self.device = torch.device(f"cuda:{self.rank}")
+        self.use_contrastive_fm = use_contrastive_fm
 
     def train_one_epoc(
         self,
@@ -69,16 +71,20 @@ class Executor:
 
         use_ddp = info_dict["train_engine"] == "torch_ddp"
 
+
         for batch_idx, batch_dict in enumerate(train_data_loader):
             info_dict["tag"] = "TRAIN"
             info_dict["step"] = self.step
             info_dict["epoch"] = self.epoch
             info_dict["batch_idx"] = batch_idx
 
+
             if use_ddp and (batch_idx + 1) % info_dict["accum_grad"] != 0:
                 context = model.no_sync
             else:
                 context = nullcontext
+
+
             with context():
                 info_dict = batch_forward(
                     model,
@@ -88,6 +94,7 @@ class Executor:
                     ref_model=self.ref_model,
                     dpo_loss=self.dpo_loss,
                 )
+
                 info_dict = batch_backward(model, scaler, info_dict)
 
             info_dict = update_parameter_and_lr(

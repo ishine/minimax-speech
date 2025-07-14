@@ -250,6 +250,7 @@ def batch_forward(model, batch, scaler, info_dict, ref_model=None, dpo_loss=None
 
     with autocast:
         info_dict['loss_dict'] = model(batch, device)
+        # print('infor_dict loss_dict : ', info_dict['loss_dict'])
         if ref_model is not None and dpo_loss is not None:
             chosen_logps = info_dict['loss_dict']["chosen_logps"]
             rejected_logps = info_dict['loss_dict']["rejected_logps"]

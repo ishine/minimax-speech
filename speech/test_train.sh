@@ -1,19 +1,17 @@
 #!/bin/bash
 # Copyright 2024 Alibaba Inc. All Rights Reserved.
 
-stage=-1
-stop_stage=3
 
 data_url=www.openslr.org/resources/60
 data_dir=data
 pretrained_model_dir=./pretrained_models/CosyVoice2-0.5B
 
-if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
-  echo "Data Download"
-  for part in test-clean; do
-    local/download_and_untar.sh ${data_dir} ${data_url} ${part}
-  done
-fi
+# if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
+#   echo "Data Download"
+#   for part in test-clean; do
+#     local/download_and_untar.sh ${data_dir} ${data_url} ${part}
+#   done
+# fi
 
 # if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
 #   echo "Data preparation, prepare wav.scp/text/utt2spk/spk2utt"
@@ -50,44 +48,31 @@ fi
 #   done
 # fi
 
-# # train llm
-# export CUDA_VISIBLE_DEVICES="0,1,2,3"
-# num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
-# job_id=1986
-# dist_backend="nccl"
-# num_workers=2
-# prefetch=100
-# train_engine=torch_ddp
-# if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
-#   echo "Run train. We only support llm traning for now. If your want to train from scratch, please use conf/cosyvoice.fromscratch.yaml"
-#   if [ $train_engine == 'deepspeed' ]; then
-#     echo "Notice deepspeed has its own optimizer config. Modify conf/ds_stage2.json if necessary"
-#   fi
-#   cat data/{train-clean-100,train-clean-360,train-other-500}/parquet/data.list > data/train.data.list
-#   cat data/{dev-clean,dev-other}/parquet/data.list > data/dev.data.list
-#   # NOTE will update llm/hift training later
-#   for model in llm flow hifigan; do
-#     torchrun --nnodes=1 --nproc_per_node=$num_gpus \
-#         --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
-#       cosyvoice/bin/train.py \
-#       --train_engine $train_engine \
-#       --config conf/cosyvoice2.yaml \
-#       --train_data data/train.data.list \
-#       --cv_data data/dev.data.list \
-#       --qwen_pretrain_path $pretrained_model_dir/CosyVoice-BlankEN \
-#       --model $model \
-#       --checkpoint $pretrained_model_dir/$model.pt \
-#       --model_dir `pwd`/exp/cosyvoice2/$model/$train_engine \
-#       --tensorboard_dir `pwd`/tensorboard/cosyvoice2/$model/$train_engine \
-#       --ddp.dist_backend $dist_backend \
-#       --num_workers ${num_workers} \
-#       --prefetch ${prefetch} \
-#       --pin_memory \
-#       --use_amp \
-#       --deepspeed_config ./conf/ds_stage2.json \
-#       --deepspeed.save_states model+optimizer
-#   done
-# fi
+# train llm
+export CUDA_VISIBLE_DEVICES="0"
+num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
+job_id=1986
+dist_backend="nccl"
+num_workers=2
+prefetch=100
+train_engine=torch_ddp
+model=flow
+
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
+  train.py \
+  --train_engine $train_engine \
+  --config config.yaml \
+  --train_data data/data.list \
+  --cv_data data/data.list \
+  --qwen_pretrain_path $pretrained_model_dir/CosyVoice-BlankEN \
+  --model $model \
+  --checkpoint $pretrained_model_dir/$model.pt \
+  --model_dir /mnt/nvme/speech/$model/ \
+  --num_workers ${num_workers} \
+  --prefetch ${prefetch} \
+  --pin_memory \
+  --use_amp \
+  --comet_disabled
 
 # # average model
 # average_num=5

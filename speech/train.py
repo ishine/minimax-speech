@@ -31,11 +31,10 @@ from cosyvoice.utils.executor import Executor
 from cosyvoice.utils.losses import DPOLoss
 from cosyvoice.utils.train_utils import (check_modify_and_save_config,
                                          init_dataset_and_dataloader,
-                                         init_distributed,
                                          init_optimizer_and_scheduler,
-                                         init_summarywriter, save_model)
+                                         save_model)
 
-
+os.environ["COMET_LOGGING_CONSOLE"] = "ERROR"  # Only show errors
 def get_args():
     parser = argparse.ArgumentParser(description="training your network")
     parser.add_argument(
@@ -102,6 +101,20 @@ def get_args():
         type=int,
         help="timeout (in seconds) of cosyvoice_join.",
     )
+    parser.add_argument(
+        "--comet_disabled",
+        action="store_true",
+        default=False,
+        help="Disable comet ml experiment",
+    )
+    parser.add_argument(
+        "--comet_project",
+        default="speech"
+    )
+    parser.add_argument(
+        "--comet_experiment_name",
+        default="test"
+    )
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     return args
@@ -115,17 +128,8 @@ def init_comet_experiment(args, configs):
     if rank == 0 and not args.comet_disabled:
         # Set up Comet ML experiment
         experiment = Experiment(
-            api_key=args.comet_api_key,
             project_name=args.comet_project,
-            workspace=args.comet_workspace,
             experiment_name=args.comet_experiment_name,
-            disabled=args.comet_disabled,
-            offline=args.comet_offline,
-            auto_metric_logging=True,
-            auto_param_logging=True,
-            auto_histogram_weight_logging=True,
-            auto_histogram_gradient_logging=True,
-            auto_histogram_activation_logging=False,
         )
         
         # Log hyperparameters

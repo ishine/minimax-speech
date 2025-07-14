@@ -32,6 +32,8 @@ class ConditionalCFM(BASECFM):
         in_channels = in_channels + (spk_emb_dim if n_spks > 0 else 0)
         # Just change the architecture of the estimator here
         self.estimator = estimator
+        self.use_immiscible = cfm_params.use_immiscible
+        self.immiscible_k = cfm_params.immiscible_k
 
     @torch.inference_mode()
     def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None, prompt_len=0, cache=torch.zeros(1, 80, 0, 2)):
@@ -169,14 +171,73 @@ class ConditionalCFM(BASECFM):
             y: conditional flow
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        b, _, t = mu.shape
+        b, d, T = mu.shape
 
         # random timestep
         t = torch.rand([b, 1, 1], device=mu.device, dtype=mu.dtype)
         if self.t_scheduler == 'cosine':
             t = 1 - torch.cos(t * 0.5 * torch.pi)
-        # sample noise p(x_0)
-        z = torch.randn_like(x1)
+
+        
+        print(f"\n=== Immiscible Diffusion Debug ===")
+        print(f"x1 shape: {x1.shape}")
+        print(f"mu shape: {mu.shape}")
+        print(f"t shape: {t.shape}")
+        print(f"Device: {x1.device}")
+        print(f"Dtype: {x1.dtype}")
+        
+        # Apply immiscible diffusion with KNN
+        if self.use_immiscible:
+            k = getattr(self, 'immiscible_k', 4)
+            
+            # Generate k noise samples for each data point
+            z_candidates = torch.randn(b, k, d, T, device=x1.device, dtype=x1.dtype)
+            
+            print(f"z_candidates shape: {z_candidates.shape}")
+            print(f"z_candidates stats - mean: {z_candidates.mean():.4f}, std: {z_candidates.std():.4f}")
+            
+            # Flatten for distance computation
+            x1_flat = x1.flatten(start_dim=1).to(torch.float16)
+            z_candidates_flat = z_candidates.flatten(start_dim=2).to(torch.float16)
+            
+            print(f"x1_flat shape: {x1_flat.shape}")
+            print(f"z_candidates_flat shape: {z_candidates_flat.shape}")
+            
+            # Calculate distances
+            distances = torch.norm(x1_flat.unsqueeze(1) - z_candidates_flat, dim=2)
+            
+            print(f"distances shape: {distances.shape}")
+            print(f"distances stats - mean: {distances.mean():.4f}, std: {distances.std():.4f}")
+            print(f"distances min: {distances.min():.4f}, max: {distances.max():.4f}")
+            
+            # Pick the nearest noise for each data point
+            min_distances, min_indices = torch.min(distances, dim=1)
+            
+            
+            print(f"min_indices: {min_indices[:10]}")  # First 10 indices
+            print(f"min_distances stats - mean: {min_distances.mean():.4f}, std: {min_distances.std():.4f}")
+            
+            # Gather the selected noise samples
+            z = torch.gather(
+                z_candidates, 
+                1, 
+                min_indices.unsqueeze(1).unsqueeze(2).unsqueeze(3).expand(-1, 1, d, T)
+            )[:, 0, :, :]
+            
+            print(f"Selected z shape: {z.shape}")
+            print(f"Selected z stats - mean: {z.mean():.4f}, std: {z.std():.4f}")
+            
+            # Calculate distance reduction
+            with torch.no_grad():
+                orig_distance = distances[:, 0].mean()
+                selected_distance = min_distances.mean()
+                reduction_rate = (orig_distance - selected_distance) / orig_distance
+                print(f"Distance reduction: {reduction_rate:.3%}")
+                print(f"Original distance: {orig_distance:.4f}")
+                print(f"Selected distance: {selected_distance:.4f}")
+        else:         
+            # sample noise p(x_0)
+            z = torch.randn_like(x1)
 
         y = (1 - (1 - self.sigma_min) * t) * z + t * x1
         u = x1 - (1 - self.sigma_min) * z
@@ -187,13 +248,7 @@ class ConditionalCFM(BASECFM):
             mu = mu * cfg_mask.view(-1, 1, 1)
             spks = spks * cfg_mask.view(-1, 1)
             cond = cond * cfg_mask.view(-1, 1, 1)
-        # print('y shape: ', y.shape)
-        # print('mask shape: ', mask.shape)
-        # print('mu shape: ', mu.shape)
-        # print('t shape: ', t.shape)
-        # print('spks shape: ', spks.shape)
-        # print('cond shape: ', cond.shape)
-        # print('streaming: ', streaming)
+       
         pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
         loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
         return loss, y

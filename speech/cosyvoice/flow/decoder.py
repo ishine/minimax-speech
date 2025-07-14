@@ -421,6 +421,8 @@ class CausalConditionalDecoder(ConditionalDecoder):
         """
         t = self.time_embeddings(t).to(t.dtype)
         t = self.time_mlp(t)
+        # print('x shape', x.shape)
+        # print('mu shape:', mu.shape)
 
         x = pack([x, mu], "b * t")[0]
 

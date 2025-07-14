@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import torch
 import json
@@ -33,7 +32,49 @@ from deepspeed.runtime.zero.stage_1_and_2 import estimate_zero2_model_states_mem
 
 from cosyvoice.dataset.dataset import Dataset
 
-from torch.optim.lr_scheduler import LinearLR, ConstantLR, SequentialLR
+from torch.optim.lr_scheduler import LinearLR, ConstantLR, SequentialLR, _LRScheduler
+
+from loguru import logger
+
+class ResumableSequentialLR(_LRScheduler):
+    """A resumable version of SequentialLR that supports set_step"""
+    def __init__(self, optimizer, schedulers, milestones, last_epoch=-1):
+        self.schedulers = schedulers
+        self.milestones = milestones
+        self._last_lr = [group['lr'] for group in optimizer.param_groups]
+        super().__init__(optimizer, last_epoch)
+        
+    def get_lr(self):
+        # Find which scheduler to use based on last_epoch
+        idx = 0
+        for i, milestone in enumerate(self.milestones):
+            if self.last_epoch >= milestone:
+                idx = i + 1
+        
+        if idx >= len(self.schedulers):
+            idx = len(self.schedulers) - 1
+            
+        # Get lr from the appropriate scheduler
+        scheduler = self.schedulers[idx]
+        if hasattr(scheduler, '_get_closed_form_lr'):
+            return scheduler._get_closed_form_lr()
+        else:
+            return scheduler.get_lr()
+    
+    def step(self, epoch=None):
+        if epoch is None:
+            self.last_epoch += 1
+        else:
+            self.last_epoch = epoch
+            
+        # Update learning rates
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group['lr'] = lr
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+    
+    def set_step(self, step):
+        """Set the current step for resuming training"""
+        self.last_epoch = step - 1  # -1 because step() will increment it
 
 def init_distributed(args):
     world_size = int(os.environ.get('WORLD_SIZE', 1))
@@ -100,7 +141,7 @@ def wrap_cuda_model(args, model):
         model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
     else:
         if int(os.environ.get('RANK', 0)) == 0:
-            logging.info("Estimating model states memory needs (zero2)...")
+            logger.info("Estimating model states memory needs (zero2)...")
             estimate_zero2_model_states_mem_needs_all_live(
                 model,
                 num_gpus_per_node=local_world_size,
@@ -132,11 +173,12 @@ def init_optimizer_and_scheduler(configs, model):
     )
     
     # Combine schedulers: warmup for 5k steps, then constant
-    scheduler = SequentialLR(
+    scheduler = ResumableSequentialLR(
         optimizer,
         schedulers=[warmup_scheduler, constant_scheduler],
-        milestones=[5000]  # Switch after 5k steps
+        milestones=[5000]
     )
+
 
     return model, optimizer, scheduler
 
@@ -146,7 +188,9 @@ def save_model(model, model_name, info_dict):
     """Save model"""
     rank = int(os.environ.get('RANK', 0))
     model_dir = info_dict["model_dir"]
+    # os.makedirs(model_dir, exist_ok=True)
     save_model_path = os.path.join(model_dir, '{}.pt'.format(model_name))
+    
 
     if info_dict["train_engine"] == "torch_ddp":
         if rank == 0:
@@ -162,7 +206,7 @@ def save_model(model, model_name, info_dict):
         with open(info_path, 'w') as fout:
             data = yaml.dump(info_dict)
             fout.write(data)
-        logging.info('[Rank {}] Checkpoint: save to checkpoint {}'.format(rank, save_model_path))
+        logger.info('[Rank {}] Checkpoint: save to checkpoint {}'.format(rank, save_model_path))
 
 
 def cosyvoice_join(group_join, info_dict):
@@ -178,7 +222,7 @@ def cosyvoice_join(group_join, info_dict):
                                    timeout=group_join.options._timeout)
             return False
         except RuntimeError as e:
-            logging.info("Detected uneven workload distribution: {}\n".format(e) +
+            logger.info("Detected uneven workload distribution: {}\n".format(e) +
                          "Break current worker to manually join all workers, " +
                          "world_size {}, current rank {}, current local_rank {}\n".
                          format(world_size, rank, local_rank))
@@ -326,14 +370,14 @@ def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict, mode
             if torch.isfinite(grad_norm):
                 scaler.step(optimizer)
             else:
-                logging.warning('get infinite grad_norm, check your code/data if it appears frequently')
+                logger.warning('get infinite grad_norm, check your code/data if it appears frequently')
             scaler.update()
         else:
             grad_norm = clip_grad_norm_(model.parameters(), info_dict['grad_clip'])
             if torch.isfinite(grad_norm):
                 optimizer.step()
             else:
-                logging.warning('get infinite grad_norm, check your code/data if it appears frequently')
+                logger.warning('get infinite grad_norm, check your code/data if it appears frequently')
         optimizer.zero_grad()
         scheduler.step()
     info_dict["lr"] = optimizer.param_groups[0]['lr']
@@ -376,7 +420,7 @@ def log_per_step(experiment, info_dict):
         if tag == "TRAIN":
             log_str += f'lr {info_dict["lr"]:.8f} grad_norm {info_dict["grad_norm"]:.6f}'
         log_str += f' rank {rank}'
-        logging.debug(log_str)
+        logger.info(log_str)
 
 def log_per_save(experiment, info_dict):
     """Log per save using Comet ML"""
@@ -387,7 +431,7 @@ def log_per_save(experiment, info_dict):
     lr = info_dict['lr']
     rank = int(os.environ.get('RANK', 0))
     
-    # Create loss string for logging
+    # Create loss string for logger
     loss_str = ' '.join([f"{k} {v.item() if isinstance(v, torch.Tensor) else v}" for k, v in loss_dict.items()])
     logger.info(f'Epoch {epoch} Step {step + 1} CV info lr {lr} {rank} {loss_str}')
 

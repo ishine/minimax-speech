@@ -22,11 +22,11 @@ from copy import deepcopy
 import deepspeed
 import torch
 import torch.distributed as dist
+from comet_ml import Experiment
 from hyperpyyaml import load_hyperpyyaml
 from loguru import logger
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from comet_ml import Experiment
 from cosyvoice.utils.executor import Executor
 from cosyvoice.utils.losses import DPOLoss
 from cosyvoice.utils.train_utils import (check_modify_and_save_config,
@@ -35,6 +35,8 @@ from cosyvoice.utils.train_utils import (check_modify_and_save_config,
                                          save_model)
 
 os.environ["COMET_LOGGING_CONSOLE"] = "ERROR"  # Only show errors
+
+
 def get_args():
     parser = argparse.ArgumentParser(description="training your network")
     parser.add_argument(
@@ -107,14 +109,8 @@ def get_args():
         default=False,
         help="Disable comet ml experiment",
     )
-    parser.add_argument(
-        "--comet_project",
-        default="speech"
-    )
-    parser.add_argument(
-        "--comet_experiment_name",
-        default="test"
-    )
+    parser.add_argument("--comet_project", default="speech")
+    parser.add_argument("--comet_experiment_name", default="test")
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     return args
@@ -122,8 +118,8 @@ def get_args():
 
 def init_comet_experiment(args, configs):
     """Initialize Comet ML experiment"""
-    rank = int(os.environ.get('RANK', 0))
-    
+    rank = int(os.environ.get("RANK", 0))
+
     # Only create experiment on rank 0 to avoid duplicates
     if rank == 0 and not args.comet_disabled:
         # Set up Comet ML experiment
@@ -131,7 +127,7 @@ def init_comet_experiment(args, configs):
             project_name=args.comet_project,
             experiment_name=args.comet_experiment_name,
         )
-        
+
         # Log hyperparameters
         experiment.log_parameters(configs["train_conf"])
         experiment.log_parameter("model_type", args.model)
@@ -141,23 +137,28 @@ def init_comet_experiment(args, configs):
         experiment.log_parameter("dpo", args.dpo)
         experiment.log_parameter("num_workers", args.num_workers)
         experiment.log_parameter("prefetch", args.prefetch)
-        
+
         # Log model architecture if available
         if args.model in configs:
-            model_config = configs[args.model].__dict__ if hasattr(configs[args.model], '__dict__') else {}
+            model_config = (
+                configs[args.model].__dict__
+                if hasattr(configs[args.model], "__dict__")
+                else {}
+            )
             experiment.log_parameters(model_config, prefix=f"{args.model}/")
-        
+
         # Add tags
         experiment.add_tag(args.model)
         if args.dpo:
             experiment.add_tag("dpo")
         if args.use_amp:
             experiment.add_tag("amp")
-            
+
         logger.info(f"Comet ML experiment initialized: {experiment.get_name()}")
         return experiment
     else:
         return None
+
 
 @record
 def main():
@@ -182,12 +183,14 @@ def main():
 
     configs["train_conf"].update(vars(args))
 
-    world_size = int(os.environ.get('WORLD_SIZE', 1))
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
-    rank = int(os.environ.get('RANK', 0))
-    logger.info(f'training on multiple gpus, this gpu {local_rank}, rank {rank}, world_size {world_size}')
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    rank = int(os.environ.get("RANK", 0))
+    logger.info(
+        f"training on multiple gpus, this gpu {local_rank}, rank {rank}, world_size {world_size}"
+    )
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(args.dist_backend)
+    dist.init_process_group("nccl")
 
     # Get dataset & dataloader
     train_dataset, _, train_data_loader, cv_data_loader = init_dataset_and_dataloader(
@@ -199,7 +202,6 @@ def main():
 
     # Tensorboard summary
     experiment = init_comet_experiment(args, configs)
-
 
     # load checkpoint
     if args.dpo is True:
@@ -230,9 +232,7 @@ def main():
     )
 
     # Get optimizer & scheduler
-    model, optimizer, scheduler = (
-        init_optimizer_and_scheduler(configs, model)
-    )
+    model, optimizer, scheduler = init_optimizer_and_scheduler(configs, model)
     scheduler.set_step(start_step)
 
     # Save init checkpoints
@@ -246,7 +246,7 @@ def main():
         experiment.log_model(
             name=f"{args.model}_init",
             file_or_folder=os.path.join(args.model_dir, "init.pt"),
-            metadata=info_dict
+            metadata=info_dict,
         )
 
     # DPO related
@@ -279,26 +279,23 @@ def main():
     for epoch in range(start_epoch + 1, info_dict["max_epoch"]):
         executor.epoch = epoch
         train_dataset.set_epoch(epoch)
-        dist.barrier()
-        group_join = dist.new_group(
-            backend="nccl", timeout=datetime.timedelta(seconds=args.timeout)
-        )
-        
         executor.train_one_epoc(
             model,
             optimizer,
             scheduler,
             train_data_loader,
-            cv_data_loader,
             experiment,
             info_dict,
             scaler,
-            group_join,
-            model_type=args.model
+            model_type=args.model,
         )
-        dist.destroy_process_group(group_join)
+
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
     if experiment:
         experiment.end()
+
 
 if __name__ == "__main__":
     main()

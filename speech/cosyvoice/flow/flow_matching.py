@@ -299,8 +299,12 @@ class ConditionalCFM(BASECFM):
             print('contrastive_loss: ', contrastive_loss)
         else:
             contrastive_loss = torch.tensor(0.0, device=fm_loss.device)
+        print("fm_loss: ", fm_loss)
         
-        loss = fm_loss - self.lambda_weight * contrastive_loss
+        contrastive_loss = self.lambda_weight * contrastive_loss
+        print('contrastive_loss: ', contrastive_loss)
+        
+        loss = fm_loss - contrastive_loss
 
         return loss, y
 

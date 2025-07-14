@@ -187,7 +187,13 @@ class ConditionalCFM(BASECFM):
             mu = mu * cfg_mask.view(-1, 1, 1)
             spks = spks * cfg_mask.view(-1, 1)
             cond = cond * cfg_mask.view(-1, 1, 1)
-
+        # print('y shape: ', y.shape)
+        # print('mask shape: ', mask.shape)
+        # print('mu shape: ', mu.shape)
+        # print('t shape: ', t.shape)
+        # print('spks shape: ', spks.shape)
+        # print('cond shape: ', cond.shape)
+        # print('streaming: ', streaming)
         pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
         loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
         return loss, y

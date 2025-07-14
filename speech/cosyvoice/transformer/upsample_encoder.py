@@ -272,6 +272,14 @@ class UpsampleConformerEncoder(torch.nn.Module):
             checkpointing API because `__call__` attaches all the hooks of the module.
             https://discuss.pytorch.org/t/any-different-between-model-input-and-model-forward-input/3690/2
         """
+
+        # print('xs shape: ', xs.shape)
+        # print('xs_lens shape: ', xs_lens.shape)
+        # print('context shape: ', context.shape)
+        # print('decoding_chunk_size: ', decoding_chunk_size)
+        # print('num_decoding_left_chunks: ', num_decoding_left_chunks)
+        # print('streaming: ', streaming)
+
         T = xs.size(1)
         masks = ~make_pad_mask(xs_lens, T).unsqueeze(1)  # (B, 1, T)
         if self.global_cmvn is not None:
@@ -303,6 +311,8 @@ class UpsampleConformerEncoder(torch.nn.Module):
         # Here we assume the mask is not changed in encoder layers, so just
         # return the masks before encoder layers, and the masks will be used
         # for cross attention with decoder later
+        # print('output xs shape: ', xs.shape)
+        # print('output masks shape: ', masks.shape)
         return xs, masks
 
     def forward_layers(self, xs: torch.Tensor, chunk_masks: torch.Tensor,

@@ -313,9 +313,23 @@ def compute_fbank(data,
         feat = feat_extractor(waveform).squeeze(dim=0).transpose(0, 1)
         if token_mel_ratio != 0:
             # trim to align speech_token and speech_feat
-            token_len = int(min(feat.shape[0] / token_mel_ratio, sample["speech_token"].shape[0]))
+            # token_len = int(min(feat.shape[0] / token_mel_ratio, sample["speech_token"].shape[0]))
+            # feat = feat[:token_mel_ratio * token_len]
+            # sample["speech_token"] = sample["speech_token"][:token_len]
+
+            # Convert speech_token to tensor if it's a list
+            if isinstance(sample["speech_token"], list):
+                speech_token_tensor = torch.tensor(sample["speech_token"])
+            else:
+                speech_token_tensor = sample["speech_token"]
+            
+            # trim to align speech_token and speech_feat
+            token_len = int(min(feat.shape[0] / token_mel_ratio, speech_token_tensor.shape[0]))
             feat = feat[:token_mel_ratio * token_len]
-            sample["speech_token"] = sample["speech_token"][:token_len]
+            
+            # Update speech_token - keep as tensor for consistency
+            sample["speech_token"] = speech_token_tensor[:token_len]
+
         sample['speech_feat'] = feat
         yield sample
 

@@ -48,11 +48,9 @@ class Executor:
         optimizer,
         scheduler,
         train_data_loader,
-        cv_data_loader,
         experiment,
         info_dict,
         scaler,
-        group_join,
         model_type
     ):
         """Train one epoch"""
@@ -68,58 +66,51 @@ class Executor:
         model.train()
         if self.ref_model is not None:
             self.ref_model.eval()
-        model_context = (
-            model.join if info_dict["train_engine"] == "torch_ddp" else nullcontext
-        )
-        with model_context():
-            for batch_idx, batch_dict in enumerate(train_data_loader):
-                info_dict["tag"] = "TRAIN"
-                info_dict["step"] = self.step
-                info_dict["epoch"] = self.epoch
-                info_dict["batch_idx"] = batch_idx
-                if cosyvoice_join(group_join, info_dict):
-                    break
 
-               
-                if (
-                    info_dict["train_engine"] == "torch_ddp"
-                    and (batch_idx + 1) % info_dict["accum_grad"] != 0
-                ):
-                    context = model.no_sync
-            
-                else:
-                    context = nullcontext
+        use_ddp = info_dict["train_engine"] == "torch_ddp"
 
-                with context():
-                    info_dict = batch_forward(
-                        model,
-                        batch_dict,
-                        scaler,
-                        info_dict,
-                        ref_model=self.ref_model,
-                        dpo_loss=self.dpo_loss,
-                    )
-                    info_dict = batch_backward(model, scaler, info_dict)
+        for batch_idx, batch_dict in enumerate(train_data_loader):
+            info_dict["tag"] = "TRAIN"
+            info_dict["step"] = self.step
+            info_dict["epoch"] = self.epoch
+            info_dict["batch_idx"] = batch_idx
 
-                info_dict = update_parameter_and_lr(
-                    model, optimizer, scheduler, scaler, info_dict, model_type=model_type
+            if use_ddp and (batch_idx + 1) % info_dict["accum_grad"] != 0:
+                context = model.no_sync
+            else:
+                context = nullcontext
+            with context():
+                info_dict = batch_forward(
+                    model,
+                    batch_dict,
+                    scaler,
+                    info_dict,
+                    ref_model=self.ref_model,
+                    dpo_loss=self.dpo_loss,
                 )
-                log_per_step(experiment, info_dict)
-                
-                if (
-                    info_dict["save_per_step"] > 0
-                    and (self.step + 1) % info_dict["save_per_step"] == 0
-                    and (batch_idx + 1) % info_dict["accum_grad"] == 0
-                ):
+                info_dict = batch_backward(model, scaler, info_dict)
+
+            info_dict = update_parameter_and_lr(
+                model, optimizer, scheduler, scaler, info_dict, model_type=model_type
+            )
+            log_per_step(experiment, info_dict)
+
+            if (
+                info_dict.get("save_per_step", -1) > 0
+                and (self.step + 1) % info_dict["save_per_step"] == 0
+                and (batch_idx + 1) % info_dict["accum_grad"] == 0
+            ):
+                if dist.is_initialized():
                     dist.barrier()
-                    self.cv(
-                        model, cv_data_loader, experiment, info_dict, on_batch_end=False
-                    )
-                    model.train()
-                if (batch_idx + 1) % info_dict["accum_grad"] == 0:
-                    self.step += 1
+                model_name = (
+                    f"epoch_{self.epoch}_step_{self.step + 1}"
+                )
+                save_model(model, model_name, info_dict)
+                model.train()
+
+            if (batch_idx + 1) % info_dict["accum_grad"] == 0:
+                self.step += 1
         dist.barrier()
-        #self.cv(model, cv_data_loader, writer, info_dict, on_batch_end=True)
 
     @torch.inference_mode()
     def cv(self, model, cv_data_loader, experiment, info_dict, on_batch_end=True):

@@ -73,6 +73,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
         embedding = self.spk_embed_affine_layer(embedding)
 
         # concat text and prompt_text
+        print('token_len values: ', token_len)
         mask = (~make_pad_mask(token_len)).float().unsqueeze(-1).to(device)
         token = self.input_embedding(torch.clamp(token, min=0)) * mask
 
@@ -197,13 +198,19 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         feat_len = batch['speech_feat_len'].to(device)
         embedding = batch['embedding'].to(device)
 
+        # print('token: ', token.shape)
+        # print('token_len: ', token_len.shape)
+        # print('feat: ', feat.shape)
+        # print('feat_len: ', feat_len.shape)
+        # print('embedding: ', embedding.shape)
+
         # NOTE unified training, static_chunk_size > 0 or = 0
-        streaming = True if random.random() < 0.5 else False
+        streaming = False# if random.random() < 0.5 else False
 
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
         embedding = self.spk_embed_affine_layer(embedding)
-
+        # print('token_len values: ', token_len)
         # concat text and prompt_text
         mask = (~make_pad_mask(token_len)).float().unsqueeze(-1).to(device)
         token = self.input_embedding(torch.clamp(token, min=0)) * mask
@@ -222,6 +229,14 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         conds = conds.transpose(1, 2)
 
         mask = (~make_pad_mask(h_lengths.sum(dim=-1).squeeze(dim=1))).to(h)
+
+        # print('feat shape: ', feat.shape)
+        # print('mask shape: ', mask.shape)
+        # print('h shape: ', h.shape)
+        # print('embedding shape: ', embedding.shape)
+        # print('conds shape: ', conds.shape)
+        # print('streaming: ', streaming)
+
         loss, _ = self.decoder.compute_loss(
             feat.transpose(1, 2).contiguous(),
             mask.unsqueeze(1),

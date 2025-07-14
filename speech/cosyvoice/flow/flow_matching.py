@@ -283,20 +283,35 @@ class ConditionalCFM(BASECFM):
         pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
         fm_loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
 
-        neg_indices = torch.roll(torch.arange(b, device=x1.device), shifts=1)
+        
         
         # Get negative targets from shifted indices
         if b > 1:
-            u_neg = u[neg_indices]
-            neg_mask = mask[neg_indices]
+            perm = torch.randperm(b, device=x1.device)
+            # Ensure no self-pairing
+            for i in range(b):
+                if perm[i] == i:
+                    # Swap with next element (circularly)
+                    perm[i] = (i + 1) % b
+
+            # Get negative samples
+            x1_neg = x1[perm]
+            mask_neg = mask[perm]
+            
+            # Generate independent noise for negatives
+            z_neg = torch.randn_like(x1_neg)
+            
+            # Compute negative velocities
+            u_neg = x1_neg - (1 - self.sigma_min) * z_neg
             
             # Contrastive loss
             contrastive_loss = F.mse_loss(
-                pred * neg_mask, 
-                u_neg * neg_mask,
+                pred * mask_neg, 
+                u_neg * mask_neg,
                 reduction="sum"
-            ) / (torch.sum(neg_mask) * d)
-            print('contrastive_loss: ', contrastive_loss)
+            ) / (torch.sum(mask_neg) * d)
+
+            print('before contrastive_loss: ', contrastive_loss)
         else:
             contrastive_loss = torch.tensor(0.0, device=fm_loss.device)
         print("fm_loss: ", fm_loss)

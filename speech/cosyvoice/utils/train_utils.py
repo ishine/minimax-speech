@@ -37,44 +37,102 @@ from torch.optim.lr_scheduler import LinearLR, ConstantLR, SequentialLR, _LRSche
 from loguru import logger
 
 class ResumableSequentialLR(_LRScheduler):
-    """A resumable version of SequentialLR that supports set_step"""
+    """A resumable version of SequentialLR that properly manages child schedulers"""
+    
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1):
+        """
+        Args:
+            optimizer: Wrapped optimizer
+            schedulers: List of schedulers to sequentially use
+            milestones: List of epoch/step numbers when to switch schedulers
+            last_epoch: The index of last epoch/step
+        """
+        # Validate inputs
+        if len(schedulers) != len(milestones) + 1:
+            raise ValueError("Expected len(schedulers) == len(milestones) + 1")
+        
         self.schedulers = schedulers
         self.milestones = milestones
-        self._last_lr = [group['lr'] for group in optimizer.param_groups]
+        self._scheduler_idx = 0
+        
+        # Initialize parent class (this sets last_epoch and calls step())
         super().__init__(optimizer, last_epoch)
         
-    def get_lr(self):
-        # Find which scheduler to use based on last_epoch
-        idx = 0
-        for i, milestone in enumerate(self.milestones):
-            if self.last_epoch >= milestone:
-                idx = i + 1
+    def _get_scheduler_info(self, epoch):
+        """Determine which scheduler to use and its relative epoch"""
+        scheduler_idx = 0
+        relative_epoch = epoch
         
-        if idx >= len(self.schedulers):
-            idx = len(self.schedulers) - 1
-            
-        # Get lr from the appropriate scheduler
-        scheduler = self.schedulers[idx]
+        for i, milestone in enumerate(self.milestones):
+            if epoch >= milestone:
+                scheduler_idx = i + 1
+                if i == 0:
+                    relative_epoch = epoch - milestone
+                else:
+                    relative_epoch = epoch - milestone
+            else:
+                break
+                
+        # Calculate relative epoch for the current scheduler
+        if scheduler_idx == 0:
+            relative_epoch = epoch
+        elif scheduler_idx < len(self.milestones):
+            if scheduler_idx == 1:
+                relative_epoch = epoch - self.milestones[0]
+            else:
+                relative_epoch = epoch - self.milestones[scheduler_idx - 1]
+        
+        return scheduler_idx, relative_epoch
+    
+    def get_lr(self):
+        """Get learning rate from the appropriate scheduler"""
+        if not self._get_lr_called_within_step:
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                         "please use `get_last_lr()`.", UserWarning)
+        
+        # Get current scheduler and its relative epoch
+        scheduler_idx, relative_epoch = self._get_scheduler_info(self.last_epoch)
+        scheduler = self.schedulers[scheduler_idx]
+        
+        # Set the scheduler's last_epoch to match relative progress
+        scheduler.last_epoch = relative_epoch
+        
+        # Get LR from the scheduler
         if hasattr(scheduler, '_get_closed_form_lr'):
             return scheduler._get_closed_form_lr()
         else:
-            return scheduler.get_lr()
+            # Temporarily set the flag to avoid warning from child scheduler
+            scheduler._get_lr_called_within_step = True
+            lrs = scheduler.get_lr()
+            scheduler._get_lr_called_within_step = False
+            return lrs
     
     def step(self, epoch=None):
-        if epoch is None:
-            self.last_epoch += 1
-        else:
-            self.last_epoch = epoch
-            
-        # Update learning rates
-        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            param_group['lr'] = lr
-        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
-    
+        """Step the scheduler"""
+        # Step the parent class (updates last_epoch and sets _get_lr_called_within_step)
+        super().step(epoch)
+        
     def set_step(self, step):
         """Set the current step for resuming training"""
-        self.last_epoch = step - 1  # -1 because step() will increment it
+        self.last_epoch = step - 1
+        
+        # Update child schedulers' state
+        scheduler_idx, relative_epoch = self._get_scheduler_info(step - 1)
+        
+        # Set all previous schedulers to their final state
+        for i in range(scheduler_idx):
+            if i < len(self.milestones):
+                if i == 0:
+                    self.schedulers[i].last_epoch = self.milestones[i] - 1
+                else:
+                    self.schedulers[i].last_epoch = self.milestones[i] - self.milestones[i-1] - 1
+        
+        # Set current scheduler to its relative position
+        self.schedulers[scheduler_idx].last_epoch = relative_epoch
+        
+        # Update optimizer's learning rates
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_last_lr()):
+            param_group['lr'] = lr
 
 def init_distributed(args):
     world_size = int(os.environ.get('WORLD_SIZE', 1))
@@ -151,32 +209,36 @@ def wrap_cuda_model(args, model):
 
 def init_optimizer_and_scheduler(configs, model):
     """Init optimizer and scheduler"""
+    lr = configs['train_conf']['optim_conf']['lr']
+    logger.info(f"lr base: {lr}")
     if configs['train_conf']['optim'] == 'adam':
-        optimizer = optim.Adam(model.parameters(), **configs['train_conf']['optim_conf'])
+        optimizer = optim.Adam(model.parameters(), lr=lr)
     elif configs['train_conf']['optim'] == 'adamw':
-        optimizer = optim.AdamW(model.parameters(), **configs['train_conf']['optim_conf'])
+        optimizer = optim.AdamW(model.parameters(), lr=lr)
     else:
         raise ValueError("unknown optimizer: " + configs['train_conf'])
-
+    
+    warm_up_steps = configs['train_conf']['scheduler_conf']['warmup_steps']
+    total_iters = configs['train_conf']['total_iters']
     # Create schedulers
     warmup_scheduler = LinearLR(
         optimizer,
-        start_factor=1e-9,  # Start at nearly 0
+        start_factor=1e-4,  # Start at nearly 0
         end_factor=1.0,     # End at base learning rate
-        total_iters=5000    # 5k warmup steps
+        total_iters=warm_up_steps    # 5k warmup steps
     )
     
     constant_scheduler = ConstantLR(
         optimizer,
         factor=1.0,  # Keep learning rate constant
-        total_iters=float('inf')  # Run indefinitely
+        total_iters=total_iters  # Run indefinitely
     )
     
     # Combine schedulers: warmup for 5k steps, then constant
     scheduler = ResumableSequentialLR(
         optimizer,
         schedulers=[warmup_scheduler, constant_scheduler],
-        milestones=[5000]
+        milestones=[warm_up_steps]
     )
 
 
@@ -188,7 +250,7 @@ def save_model(model, model_name, info_dict):
     """Save model"""
     rank = int(os.environ.get('RANK', 0))
     model_dir = info_dict["model_dir"]
-    # os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
     save_model_path = os.path.join(model_dir, '{}.pt'.format(model_name))
     
 
@@ -292,54 +354,41 @@ def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict, mode
 
     #Define key components based on model type
     if model_type == 'llm':
-        key_components = {
-            # Text processing components
-            'text_embedding': [],
-            'text_encoder': [],
-            'text_encoder_affine': [],
-            
-            # LLM core components
-            'llm_embedding': [],
-            'llm.model': [],  # Qwen2 model layers
-            'llm_decoder': [],
-            
-            # Speech components
-            'speech_embedding': [],
-            'spk_embed_affine': [],
-            
-            # Other components
-            'other': []
+        component_patterns = {
+            'text_embedding': r'^text_embedding\.',
+            'text_encoder': r'^text_encoder\.',
+            'text_encoder_affine': r'^text_encoder_affine\.',
+            'llm_embedding': r'^llm_embedding\.',
+            'llm.model': r'^llm\.model\.',
+            'llm_decoder': r'^llm_decoder\.',
+            'speech_embedding': r'^speech_embedding\.',
+            'spk_embed_affine': r'^spk_embed_affine\.',
         }
     elif model_type == 'flow':
-        key_components = {
-            # Input processing
-            'input_embedding': [],
-            'spk_embed_affine': [],
-            
-            # Encoder components
-            'encoder': [],
-            'encoder_proj': [],
-            
-            # Flow/Diffusion components
-            'decoder.cfm': [],  # Conditional Flow Matching
-            'decoder.unet': [],  # UNet backbone
-            'decoder.estimator': [],  # Score/velocity estimator
-            'decoder.time_embedding': [],  # Time embeddings
-            'decoder.conv': [],  # Convolutional layers
-            'decoder.attention': [],  # Attention layers
-            
-            # Length regulation
-            'length_regulator': [],
-            
-            # Other components
-            'other': []
+        component_patterns = {
+            'input_embedding': r'^input_embedding\.',
+            'spk_embed_affine': r'^spk_embed_affine\.',
+            'encoder': r'^encoder\.',
+            'encoder_proj': r'^encoder_proj\.',
+            'decoder.cfm': r'^decoder\..*cfm',
+            'decoder.unet': r'^decoder\..*unet',
+            'decoder.estimator': r'^decoder\..*estimator',
+            'decoder.time_embedding': r'^decoder\..*time_embedding',
+            'decoder.conv': r'^decoder\..*conv',
+            'decoder.attention': r'^decoder\..*attention',
+            'length_regulator': r'^length_regulator\.',
         }
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+    key_components = {key: [] for key in component_patterns}
+    key_components['other'] = []
 
     grad_norm = 0.0
     layer_grad_norms = {}
 
     if (info_dict['batch_idx'] + 1) % info_dict["accum_grad"] == 0:
-
+        # logger.info('start to calculate grad norm')
         for name, param in model.named_parameters():
             if param.grad is not None:
                 # Calculate gradient norm for this parameter
@@ -381,6 +430,7 @@ def update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict, mode
                 logger.warning('get infinite grad_norm, check your code/data if it appears frequently')
         optimizer.zero_grad()
         scheduler.step()
+    logger.info(f"lr after step {optimizer.param_groups[0]['lr']}")
     info_dict["lr"] = optimizer.param_groups[0]['lr']
     info_dict["grad_norm"] = grad_norm
     info_dict["layer_grad_norms"] = layer_grad_norms
@@ -413,13 +463,13 @@ def log_per_step(experiment, info_dict):
 
     # TRAIN & CV, Shell log (stdout)
     if (info_dict['batch_idx'] + 1) % info_dict['log_interval'] == 0:
-        log_str = f'{tag} Batch {epoch}/{batch_idx + 1} '
+        log_str = f'{tag} Batch {epoch}/{batch_idx + 1} step {step} '
         for name, value in loss_dict.items():
             if isinstance(value, torch.Tensor):
                 value = value.item()
             log_str += f'{name} {value:.6f} '
         if tag == "TRAIN":
-            log_str += f'lr {info_dict["lr"]:.8f} grad_norm {info_dict["grad_norm"]:.6f}'
+            log_str += f'lr {info_dict["lr"]:.15f} grad_norm {info_dict["grad_norm"]:.6f}'
         log_str += f' rank {rank}'
         logger.info(log_str)
 

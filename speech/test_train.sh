@@ -66,14 +66,12 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --rdzv_id=$job_id --rdzv_backend=
   --cv_data data/data.list \
   --qwen_pretrain_path $pretrained_model_dir/CosyVoice-BlankEN \
   --model $model \
-  --checkpoint $pretrained_model_dir/$model.pt \
-  --model_dir /mnt/nvme/speech/$model/ \
+  --model_dir /data/checkpoint/$model/ \
   --num_workers ${num_workers} \
   --prefetch ${prefetch} \
   --pin_memory \
   --use_amp \
-  --comet_disabled
-
+  --checkpoint /data/checkpoint/flow/epoch_88_step_14001.pt
 # # average model
 # average_num=5
 # if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then

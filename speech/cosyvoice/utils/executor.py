@@ -104,8 +104,8 @@ class Executor:
 
             if (
                 info_dict.get("save_per_step", -1) > 0
-                and (self.step + 1) % info_dict["save_per_step"] == 0
-                and (batch_idx + 1) % info_dict["accum_grad"] == 0
+                and (self.step) % info_dict["save_per_step"] == 0
+                and (batch_idx) % info_dict["accum_grad"] == 0
             ):
                 if dist.is_initialized():
                     dist.barrier()

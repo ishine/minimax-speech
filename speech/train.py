@@ -211,6 +211,7 @@ def main():
     start_step, start_epoch = 0, -1
     if args.checkpoint is not None:
         if os.path.exists(args.checkpoint):
+            logger.info(f"Load checkpoint from {args.checkpoint}")
             state_dict = torch.load(args.checkpoint, map_location="cpu")
             model.load_state_dict(state_dict, strict=False)
             if "step" in state_dict:

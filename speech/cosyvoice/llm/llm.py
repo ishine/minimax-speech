@@ -27,7 +27,72 @@ from cosyvoice.transformer.label_smoothing_loss import LabelSmoothingLoss
 from cosyvoice.utils.common import th_accuracy
 from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.mask import make_pad_mask
+from cosyvoice.transformer.attention import MultiHeadedAttention
+from cosyvoice.transformer.encoder_layer import ConformerEncoderLayer
 
+class LearnableSpeakerEncoder(nn.Module):
+    """
+    Speaker encoder inspired by Tortoise-TTS for CosyVoice2.
+    Processes mel-spectrograms through attention blocks to extract speaker characteristics.
+    """
+    def __init__(
+        self,
+        mel_dim: int = 80,
+        model_dim: int = 512,
+        output_dim: int = 192,
+        num_blocks: int = 6,
+        num_heads: int = 8,
+        kernel_size: int = 1,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        
+        # Initial projection (like Tortoise's ConditioningEncoder)
+        self.init = nn.Conv1d(mel_dim, model_dim, kernel_size=kernel_size)
+                
+        self.blocks = nn.ModuleList([
+            ConformerEncoderLayer(
+                size=model_dim,
+                self_attn=MultiHeadedAttention(
+                    n_head=num_heads,
+                    n_feat=model_dim,
+                    dropout_rate=dropout,
+                ),
+                feed_forward=None,  # Can add if needed
+                feed_forward_macaron=None,
+                conv_module=None,
+                dropout_rate=dropout,
+                normalize_before=True,
+            ) for _ in range(num_blocks)
+        ])
+        
+        # Output projection
+        self.output_proj = nn.Linear(model_dim, output_dim)
+        
+    def forward(self, x, mask=None):
+        """
+        Args:
+            x: mel-spectrogram [B, 80, T]
+            mask: padding mask [B, 1, T]
+        Returns:
+            speaker embedding [B, output_dim]
+        """
+        # Initial conv
+        h = self.init(x)  # [B, model_dim, T]
+        h = h.transpose(1, 2)  # [B, T, model_dim]
+        
+        # Apply attention blocks
+        for block in self.blocks:
+            h, _ = block(h, mask)
+        
+        # Pool over time (take first position like Tortoise)
+        # Could also use mean pooling
+        output = h[:, 0, :]  # [B, model_dim]
+        
+        # Project to output dimension
+        output = self.output_proj(output)  # [B, output_dim]
+        
+        return F.normalize(output, p=2, dim=1)
 
 class TransformerLM(torch.nn.Module):
     def __init__(
@@ -43,6 +108,8 @@ class TransformerLM(torch.nn.Module):
             length_normalized_loss: bool = True,
             lsm_weight: float = 0.0,
             spk_embed_dim: int = 192,
+            use_speaker_encoder: bool = False,
+            max_conditioning_inputs: int = 3,
     ):
         super().__init__()
         self.llm_input_size = llm_input_size
@@ -69,11 +136,77 @@ class TransformerLM(torch.nn.Module):
         )
 
         # 3. [Optional] build speech token related modules
+
+        self.use_speaker_encoder = use_speaker_encoder
+        self.max_conditioning_inputs = max_conditioning_inputs
+        
+        if use_speaker_encoder:
+            self.speaker_encoder = LearnableSpeakerEncoder(
+                mel_dim=80,
+                model_dim=512,
+                output_dim=spk_embed_dim,
+                num_blocks=6,
+                num_heads=8,
+            )
+            self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, llm_input_size)
+        else:
+            # Fallback to embedding-based approach
+            self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, llm_input_size)
+
         self.speech_embedding = torch.nn.Embedding(speech_token_size, llm_input_size)
-        self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, llm_input_size)
 
         # 4. sampling method
         self.sampling = sampling
+
+    def get_speaker_conditioning(self, batch, device):
+        """Extract speaker conditioning from reference audio or embeddings."""
+        
+        if self.use_speaker_encoder and 'reference_mels' in batch:
+            reference_mels = batch['reference_mels'].to(device)
+            
+            # Handle multiple references
+            if reference_mels.dim() == 4:  # [B, N, T, 80]
+                B, N, T, D = reference_mels.shape
+                conds = []
+                
+                for i in range(N):
+                    ref_mel = reference_mels[:, i, :, :].transpose(1, 2)  # [B, 80, T]
+                    if 'reference_mel_masks' in batch:
+                        mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
+                    else:
+                        mask = None
+                    
+                    cond = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]
+                    conds.append(cond)
+                
+                # Average multiple references (like Tortoise)
+                speaker_embed = torch.stack(conds, dim=1).mean(dim=1)  # [B, spk_embed_dim]
+                
+            else:  # Single reference [B, T, 80]
+                ref_mel = reference_mels.transpose(1, 2)  # [B, 80, T]
+                if 'reference_mel_mask' in batch:
+                    mask = batch['reference_mel_mask'].unsqueeze(1).to(device)
+                else:
+                    mask = None
+                speaker_embed = self.speaker_encoder(ref_mel, mask)
+            
+            # Project to LLM dimension
+            speaker_embed = self.spk_embed_affine_layer(speaker_embed)
+            speaker_embed = speaker_embed.unsqueeze(1)  # [B, 1, llm_input_size]
+            
+        elif 'embedding' in batch:
+            # Use provided embeddings (backward compatibility)
+            embedding = batch['embedding'].to(device)
+            embedding = F.normalize(embedding, dim=1)
+            speaker_embed = self.spk_embed_affine_layer(embedding)
+            speaker_embed = speaker_embed.unsqueeze(1)
+            
+        else:
+            # No speaker conditioning
+            B = batch['text_token'].shape[0]
+            speaker_embed = torch.zeros(B, 1, self.llm_input_size).to(device)
+            
+        return speaker_embed
 
     def encode(
             self,

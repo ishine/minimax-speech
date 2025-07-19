@@ -312,12 +312,7 @@ def compute_fbank(data,
         waveform = sample['speech']
         feat = feat_extractor(waveform).squeeze(dim=0).transpose(0, 1)
         if token_mel_ratio != 0:
-            # trim to align speech_token and speech_feat
-            # token_len = int(min(feat.shape[0] / token_mel_ratio, sample["speech_token"].shape[0]))
-            # feat = feat[:token_mel_ratio * token_len]
-            # sample["speech_token"] = sample["speech_token"][:token_len]
-
-            # Convert speech_token to tensor if it's a list
+            
             if isinstance(sample["speech_token"], list):
                 speech_token_tensor = torch.tensor(sample["speech_token"])
             else:
@@ -333,6 +328,80 @@ def compute_fbank(data,
         sample['speech_feat'] = feat
         yield sample
 
+
+def extract_reference_mel_from_speech(
+    data,
+    feat_extractor,
+    min_length=2.0,
+    max_length=6.0,
+    num_crops=2,  # Multiple random crops from same utterance
+    training=True,
+    sample_rate=24000,
+    mode='train'
+):
+    """
+    Extract mel spectrograms from current speech waveform with random cropping.
+    This creates multiple random crops from the same utterance for training diversity.
+    """
+    for sample in data:
+        # Use the current speech waveform
+        waveform = sample['speech']  # [1, T]
+        speech_length = waveform.shape[1]
+        
+        # Convert time to samples
+        min_samples = int(min_length * sample_rate)
+        max_samples = int(max_length * sample_rate)
+        
+        reference_mels = []
+        reference_mel_lengths = []
+        
+        # Skip if utterance is too short
+        if speech_length < min_samples:
+            logging.warning(f"Speech for {sample['utt']} is too short ({speech_length/sample_rate:.2f}s)")
+            sample['reference_mels'] = []
+            sample['reference_mel_lengths'] = []
+            sample['num_references'] = 0
+            yield sample
+            continue
+        
+        # Generate multiple crops from the same utterance
+        crops_to_generate = num_crops if training else 1
+        
+        for i in range(crops_to_generate):
+            if training and speech_length > max_samples:
+                # Random crop during training
+                crop_length = random.randint(min_samples, min(max_samples, speech_length))
+                start_idx = random.randint(0, speech_length - crop_length)
+                audio_segment = waveform[:, start_idx:start_idx + crop_length]
+            elif speech_length > max_samples:
+                # Center crop during inference
+                start_idx = (speech_length - max_samples) // 2
+                audio_segment = waveform[:, start_idx:start_idx + max_samples]
+            else:
+                # Use full audio if shorter than max_length
+                audio_segment = waveform
+                # For training, if we need multiple crops but audio is short,
+                # we can add slight variations
+                if training and i > 0:
+                    # Add very slight noise for variation
+                    noise = torch.randn_like(audio_segment) * 0.001
+                    audio_segment = audio_segment + noise
+            
+            # Normalize audio segment
+            max_val = audio_segment.abs().max()
+            if max_val > 0:
+                audio_segment = audio_segment / max_val
+            
+            # Extract mel spectrogram
+            mel = feat_extractor(audio_segment).squeeze(0)  # Remove batch dim [C, T]
+            reference_mels.append(mel)
+            reference_mel_lengths.append(mel.shape[1])
+        
+        sample['reference_mels'] = reference_mels
+        sample['reference_mel_lengths'] = reference_mel_lengths
+        sample['num_references'] = len(reference_mels)
+        
+        yield sample
 
 def compute_f0(data, sample_rate, hop_size, mode='train'):
     """ Extract f0
@@ -505,19 +574,19 @@ def batch(data, batch_type='static', batch_size=16, max_frames_in_batch=12000, m
     else:
         logging.fatal('Unsupported batch type {}'.format(batch_type))
 
-
-def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False):
+def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_speaker_encoder=False):
     """ Padding the data into training data
 
         Args:
             data: Iterable[List[{key, feat, label}]]
+            use_speaker_encoder: Whether to prepare reference mels for speaker encoder
 
         Returns:
             Iterable[Tuple(keys, feats, labels, feats lengths, label lengths)]
     """
     for sample in data:
         assert isinstance(sample, list)
-        speech_feat_len = torch.tensor([x['speech_feat'].size(1) for x in sample],
+        speech_feat_len = torch.tensor([x['speech_feat'].size(0) for x in sample],  # Changed from size(1) to size(0)
                                        dtype=torch.int32)
         order = torch.argsort(speech_feat_len, descending=True)
 
@@ -525,11 +594,19 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False):
         speech = [sample[i]['speech'].squeeze(dim=0) for i in order]
         speech_len = torch.tensor([i.size(0) for i in speech], dtype=torch.int32)
         speech = pad_sequence(speech, batch_first=True, padding_value=0)
-        speech_token = [torch.tensor(sample[i]['speech_token']) for i in order]
+        
+        # Handle speech_token - check if it's already a tensor
+        speech_token = []
+        for i in order:
+            if isinstance(sample[i]['speech_token'], torch.Tensor):
+                speech_token.append(sample[i]['speech_token'])
+            else:
+                speech_token.append(torch.tensor(sample[i]['speech_token']))
         speech_token_len = torch.tensor([i.size(0) for i in speech_token], dtype=torch.int32)
         speech_token = pad_sequence(speech_token,
                                     batch_first=True,
                                     padding_value=0)
+        
         speech_feat = [sample[i]['speech_feat'] for i in order]
         speech_feat_len = torch.tensor([i.size(0) for i in speech_feat], dtype=torch.int32)
         speech_feat = pad_sequence(speech_feat,
@@ -541,6 +618,7 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False):
         text_token = pad_sequence(text_token, batch_first=True, padding_value=0)
         utt_embedding = torch.stack([sample[i]['utt_embedding'] for i in order], dim=0)
         spk_embedding = torch.stack([sample[i]['spk_embedding'] for i in order], dim=0)
+        
         batch = {
             "utts": utts,
             "speech": speech,
@@ -555,6 +633,71 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False):
             "utt_embedding": utt_embedding,
             "spk_embedding": spk_embedding,
         }
+        
+        # Handle reference mels for speaker encoder
+        if use_speaker_encoder:
+            # Collect all reference mels
+            all_reference_mels = []
+            all_reference_mel_lengths = []
+            all_num_references = []
+            
+            for i in order:
+                ref_mels = sample[i].get('reference_mels', [])
+                ref_lengths = sample[i].get('reference_mel_lengths', [])
+                num_refs = sample[i].get('num_references', 0)
+                
+                all_reference_mels.append(ref_mels)
+                all_reference_mel_lengths.append(ref_lengths)
+                all_num_references.append(num_refs)
+            
+            # Determine max number of references in batch
+            max_num_refs = max(all_num_references) if all_num_references else 0
+            
+            if max_num_refs > 0:
+                # Find dimensions
+                batch_size = len(order)
+                max_mel_length = 0
+                mel_dim = 80  # default
+                
+                # Find max mel length and mel dimension
+                for ref_mels in all_reference_mels:
+                    for mel in ref_mels:
+                        if isinstance(mel, torch.Tensor) and mel.numel() > 0:
+                            max_mel_length = max(max_mel_length, mel.shape[1])
+                            mel_dim = mel.shape[0]
+                
+                if max_mel_length > 0:
+                    # Create padded tensor [B, N, C, T]
+                    padded_reference_mels = torch.zeros(batch_size, max_num_refs, mel_dim, max_mel_length)
+                    padded_reference_mel_lengths = torch.zeros(batch_size, max_num_refs, dtype=torch.int32)
+                    reference_mel_masks = torch.zeros(batch_size, max_num_refs, max_mel_length)
+                    
+                    for b_idx, (ref_mels, ref_lengths) in enumerate(zip(all_reference_mels, all_reference_mel_lengths)):
+                        for r_idx in range(min(len(ref_mels), max_num_refs)):
+                            if r_idx < len(ref_mels) and isinstance(ref_mels[r_idx], torch.Tensor):
+                                mel = ref_mels[r_idx]
+                                length = ref_lengths[r_idx] if r_idx < len(ref_lengths) else mel.shape[1]
+                                actual_length = min(length, mel.shape[1], max_mel_length)
+                                
+                                padded_reference_mels[b_idx, r_idx, :, :actual_length] = mel[:, :actual_length]
+                                padded_reference_mel_lengths[b_idx, r_idx] = actual_length
+                                reference_mel_masks[b_idx, r_idx, :actual_length] = 1.0
+                    
+                    batch['reference_mels'] = padded_reference_mels
+                    batch['reference_mel_lengths'] = padded_reference_mel_lengths
+                    batch['reference_mel_masks'] = reference_mel_masks
+                else:
+                    # No valid mels, create dummy
+                    batch['reference_mels'] = torch.zeros(batch_size, 1, mel_dim, 100)
+                    batch['reference_mel_lengths'] = torch.zeros(batch_size, 1, dtype=torch.int32)
+                    batch['reference_mel_masks'] = torch.zeros(batch_size, 1, 100)
+            else:
+                # No references available, create dummy for batch
+                batch_size = len(order)
+                batch['reference_mels'] = torch.zeros(batch_size, 1, 80, 100)
+                batch['reference_mel_lengths'] = torch.zeros(batch_size, 1, dtype=torch.int32)
+                batch['reference_mel_masks'] = torch.zeros(batch_size, 1, 100)
+        
         if gan is True:
             # in gan train, we need pitch_feat
             pitch_feat = [sample[i]['pitch_feat'] for i in order]
@@ -568,16 +711,24 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False):
             # only gan train needs speech, delete it to save memory
             del batch["speech"]
             del batch["speech_len"]
+            
         if dpo is True:
-            reject_speech_token = [torch.tensor(sample[i]['reject_speech_token']) for i in order]
+            reject_speech_token = []
+            for i in order:
+                if isinstance(sample[i]['reject_speech_token'], torch.Tensor):
+                    reject_speech_token.append(sample[i]['reject_speech_token'])
+                else:
+                    reject_speech_token.append(torch.tensor(sample[i]['reject_speech_token']))
             reject_speech_token_len = torch.tensor([i.size(0) for i in reject_speech_token], dtype=torch.int32)
             reject_speech_token = pad_sequence(reject_speech_token,
                                                batch_first=True,
                                                padding_value=0)
             batch['reject_speech_token'] = reject_speech_token
             batch['reject_speech_token_len'] = reject_speech_token_len
+            
         if use_spk_embedding is True:
             batch["embedding"] = batch["spk_embedding"]
         else:
             batch["embedding"] = batch["utt_embedding"]
+            
         yield batch

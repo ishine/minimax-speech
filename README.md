@@ -135,16 +135,11 @@ pip install -r requirements.txt
 ```
 minimax-speech/
 ├── assets/
-│   └── image.png
-├── configs/
-│   └── dac_vae.yaml
-├── models/
-│   ├── fsq/
-│   └── dac_vae/
-├── cosyvoice/          # Components from CosyVoice2
+├── dac-vae/
+├── flowae/
+├── speech/    
+│   ├── llm/
 │   ├── flow/
-│   ├── transformer/
-│   └── utils/
 └── README.md
 ```
 

@@ -17,6 +17,16 @@ token_mel_ratio: 2
 chunk_size: 25 # streaming inference chunk size, in token
 num_decoding_left_chunks: -1 # streaming inference flow decoder left chunk size, <0 means use all left chunks
 
+use_speaker_encoder: True  # New flag
+speaker_encoder_config:
+    mel_dim: 80
+    model_dim: 512
+    output_dim: !ref <spk_embed_dim>  # 192
+    num_blocks: 6
+    num_heads: 8
+    kernel_size: 1
+    dropout: 0.1
+    max_conditioning_inputs: 3  # Support multiple references
 # model params
 # for all class/function included in this repo, we use !<name> or !<new> for intialization, so that user may find all corresponding class/function according to one single yaml.
 # for system/third_party class/function, we do not require this.
@@ -27,6 +37,9 @@ llm: !new:cosyvoice.llm.llm.Qwen2LM
     length_normalized_loss: True
     lsm_weight: 0
     mix_ratio: [5, 15]
+    use_speaker_encoder: !ref <use_speaker_encoder>  # Add this
+    spk_embed_dim: !ref <spk_embed_dim>
+    max_conditioning_inputs: 3
     llm: !new:cosyvoice.llm.llm.Qwen2Encoder
         pretrain_path: !ref <qwen_pretrain_path>
     sampling: !name:cosyvoice.utils.common.ras_sampling
@@ -34,6 +47,14 @@ llm: !new:cosyvoice.llm.llm.Qwen2LM
         top_k: 25
         win_size: 10
         tau_r: 0.1
+#
+extract_reference_mel: !name:cosyvoice.dataset.processor.extract_reference_mel_from_speech
+    feat_extractor: !ref <feat_extractor>
+    min_length: 0.5
+    max_length: 6.0
+    num_crops: 2  # Multiple crops from same utterance
+    training: True
+    sample_rate: !ref <sample_rate>
 
 flow: !new:cosyvoice.flow.flow.CausalMaskedDiffWithXvec
     input_size: 512
@@ -180,6 +201,7 @@ batch: !name:cosyvoice.dataset.processor.batch
     max_frames_in_batch: 25000
 padding: !name:cosyvoice.dataset.processor.padding
     use_spk_embedding: False # change to True during sft
+    use_speaker_encoder: !ref <use_speaker_encoder>
 
 
 # dataset processor pipeline
@@ -189,6 +211,7 @@ data_pipeline: [
     !ref <filter>,
     !ref <resample>,
     !ref <compute_fbank>,
+    !ref <extract_reference_mel>,  # Add this for speaker encoder
     !ref <parse_embedding>,
     !ref <shuffle>,
     !ref <sort>,

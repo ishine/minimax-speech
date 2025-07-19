@@ -666,6 +666,66 @@ class Qwen2LM(TransformerLM):
         return {'loss': loss, 'acc': acc, 'chosen_logps': chosen_logps, 'rejected_logps': rejected_logps}
 
     @torch.inference_mode()
+    def inference_spk(
+            self,
+            text: torch.Tensor,
+            text_len: torch.Tensor,
+            prompt_text: torch.Tensor,
+            prompt_text_len: torch.Tensor,
+            prompt_speech_token: torch.Tensor,
+            prompt_speech_token_len: torch.Tensor,
+            embedding: torch.Tensor = None,
+            reference_mels: torch.Tensor = None,
+            reference_mel_lengths: torch.Tensor = None,
+            reference_mel_masks: torch.Tensor = None,
+            sampling: int = 25,
+            max_token_text_ratio: float = 20,
+            min_token_text_ratio: float = 2,
+            uuid: str = '',
+    ) -> Generator[torch.Tensor, None, None]:
+        device = text.device
+        text = torch.concat([prompt_text, text], dim=1)
+        text_len += prompt_text_len
+        text = self.llm.model.model.embed_tokens(text)
+        
+        # Get speaker conditioning
+        if self.use_speaker_encoder and reference_mels is not None:
+            # Use speaker encoder
+            batch = {
+                'reference_mels': reference_mels,
+                'reference_mel_lengths': reference_mel_lengths,
+                'reference_mel_masks': reference_mel_masks
+            }
+            speaker_embed = self.get_speaker_conditioning(batch, device)  # [1, 1, llm_input_size]
+        elif embedding is not None and embedding.shape[0] != 0:
+            # Use provided embeddings
+            embedding = F.normalize(embedding, dim=1)
+            speaker_embed = self.spk_embed_affine_layer(embedding)
+            speaker_embed = speaker_embed.unsqueeze(1)
+        else:
+            # No speaker conditioning
+            speaker_embed = torch.zeros(1, 1, self.llm_input_size).to(device)
+
+        # 3. concat llm_input with speaker embedding
+        sos_eos_emb = self.llm_embedding.weight[self.sos_eos].reshape(1, 1, -1)
+        task_id_emb = self.llm_embedding.weight[self.task_id].reshape(1, 1, -1)
+        if prompt_speech_token_len != 0:
+            prompt_speech_token_emb = self.speech_embedding(prompt_speech_token)
+        else:
+            prompt_speech_token_emb = torch.zeros(1, 0, self.llm_input_size, dtype=text.dtype).to(device)
+        
+        # Include speaker embedding in the sequence
+        lm_input = torch.concat([sos_eos_emb, speaker_embed, text, task_id_emb, prompt_speech_token_emb], dim=1)
+
+        # 4. cal min/max_length
+        min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
+        max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
+
+        # 5. step by step decode
+        for token in self.inference_wrapper(lm_input, sampling, min_len, max_len, uuid):
+            yield token
+
+    @torch.inference_mode()
     def inference(
             self,
             text: torch.Tensor,

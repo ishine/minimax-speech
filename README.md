@@ -61,7 +61,12 @@ pip install -r requirements.txt
 
 1. **Extracting FSQ** (if not using pretrained)
    ```bash
-   # Add training command
+   pip install 
+   s3tokenizer --wav_scp data.scp \
+            --device "cuda" \
+            --output_dir "./data" \
+            --batch_size 32 \
+            --model "speech_tokenizer_v2_25hz"
    ```
 
 2. **Extracting DAC-VAE latent**

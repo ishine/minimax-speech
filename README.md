@@ -10,15 +10,11 @@ This repository provides an implementation of the MiniMax-Speech model, featurin
 
 ## Key Features
 
-- [ ] **24kHz Audio Support**: High-quality audio generation at 24kHz sampling rate
-- [ ] **FSQ tokenizer training**: Training FSQ from scratch
-- [ ] **Two-Stage Architecture**: Optimized training pipeline with discrete and continuous representations
-- [ ] **Modular Design**: Separate components for audio codec and variational autoencoder
-- [ ] **CosyVoice2 Decoder**: Leverages proven components from the CosyVoice2's Decoder framework
-- [ ] **Flow matching AE**: Flow matching training for autoencoders
-- [ ] **Immiscible assignment**: Support immiscible adding noise while training
-- [ ] **Contrastive Flow matching**: Support Contrastive training
-
+- [x] **24kHz Audio Support**: High-quality audio generation at 24kHz sampling rate
+- [x] **Flow matching AE**: Flow matching training for autoencoders
+- [x] **Immiscible assignment**: Support immiscible adding noise while training
+- [x] **Contrastive Flow matching**: Support Contrastive training
+- [ ] **Checkpoint release**: Release LLM and Contrastive FM checkpoint
 ## Architecture
 
 ### Stage 1: Audio to Discrete Tokens
@@ -76,12 +72,63 @@ pip install -r requirements.txt
 
 3. **Stage 1: Auto Regressive Transformer**
    ```bash
-   # Add feature extraction commands
+   #!/bin/bash
+   pretrained_model_dir=./pretrained_models/CosyVoice2-0.5B
+
+   export CUDA_VISIBLE_DEVICES="0"
+   num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
+   job_id=1986
+   dist_backend="nccl"
+   num_workers=2
+   prefetch=100
+   train_engine=torch_ddp
+   model=llm
+
+   torchrun --nnodes=1 --nproc_per_node=$num_gpus --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
+   train.py \
+   --train_engine $train_engine \
+   --config config.yaml \
+   --train_data data/data.list \
+   --cv_data data/data.list \
+   --qwen_pretrain_path $pretrained_model_dir/CosyVoice-BlankEN \
+   --model $model \
+   --model_dir /data/checkpoint/$model/ \
+   --num_workers ${num_workers} \
+   --prefetch ${prefetch} \
+   --pin_memory \
+   --use_amp \
+   --comet_disabled
+
    ```
 
 4. **Stage 2: FLow matching decoder**
    ```bash
-   # Add main training command
+   #!/bin/bash
+   pretrained_model_dir=./pretrained_models/CosyVoice2-0.5B
+   export CUDA_VISIBLE_DEVICES="0"
+   num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
+   job_id=1986
+   dist_backend="nccl"
+   num_workers=2
+   prefetch=100
+   train_engine=torch_ddp
+   model=llm
+
+   torchrun --nnodes=1 --nproc_per_node=$num_gpus --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
+   train.py \
+   --train_engine $train_engine \
+   --config config.yaml \
+   --train_data data/data.list \
+   --cv_data data/data.list \
+   --qwen_pretrain_path $pretrained_model_dir/CosyVoice-BlankEN \
+   --model $model \
+   --model_dir /data/checkpoint/$model/ \
+   --num_workers ${num_workers} \
+   --prefetch ${prefetch} \
+   --pin_memory \
+   --use_amp \
+   --comet_disabled
+
    ```
 
 ## Project Structure
@@ -134,7 +181,6 @@ If you use this code in your research, please cite:
 This project follows the licensing terms of its dependencies:
 - CosyVoice2 components: [Check CosyVoice2 License](https://github.com/FunAudioLLM/CosyVoice/blob/main/LICENSE)
 - FSQ components: [Apache 2.0 License](https://github.com/xingchensong/S3Tokenizer/blob/main/LICENSE)
-- Original contributions: [Specify your license here]
 
 ## Acknowledgments
 

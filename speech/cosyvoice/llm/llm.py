@@ -29,11 +29,11 @@ from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.mask import make_pad_mask
 from cosyvoice.transformer.attention import MultiHeadedAttention
 from cosyvoice.transformer.encoder_layer import ConformerEncoderLayer
+from cosyvoice.transformer.arch_util import AttentionBlock
 
 class LearnableSpeakerEncoder(nn.Module):
     """
-    Speaker encoder inspired by Tortoise-TTS for CosyVoice2.
-    Processes mel-spectrograms through attention blocks to extract speaker characteristics.
+    Speaker encoder using the same architecture as Tortoise-TTS ConditioningEncoder.
     """
     def __init__(
         self,
@@ -42,57 +42,59 @@ class LearnableSpeakerEncoder(nn.Module):
         output_dim: int = 192,
         num_blocks: int = 6,
         num_heads: int = 8,
-        kernel_size: int = 1,
         dropout: float = 0.0,
+        mean_pooling: bool = False,  # Tortoise uses first position by default
     ):
         super().__init__()
         
-        # Initial projection (like Tortoise's ConditioningEncoder)
-        self.init = nn.Conv1d(mel_dim, model_dim, kernel_size=kernel_size)
-                
-        self.blocks = nn.ModuleList([
-            ConformerEncoderLayer(
-                size=model_dim,
-                self_attn=MultiHeadedAttention(
-                    n_head=num_heads,
-                    n_feat=model_dim,
-                    dropout_rate=dropout,
-                ),
-                feed_forward=None,  # Can add if needed
-                feed_forward_macaron=None,
-                conv_module=None,
-                dropout_rate=dropout,
-                normalize_before=True,
-            ) for _ in range(num_blocks)
-        ])
+        # Same as Tortoise ConditioningEncoder
+        self.init = nn.Conv1d(mel_dim, model_dim, kernel_size=1)
         
-        # Output projection
+        # AttentionBlock from Tortoise
+        attn = []
+        for _ in range(num_blocks):
+            attn.append(AttentionBlock(model_dim, num_heads))
+        self.attn = nn.Sequential(*attn)
+        
+        self.dim = model_dim
+        self.mean_pooling = mean_pooling
+        
+        # Output projection to match CosyVoice embedding dimension
         self.output_proj = nn.Linear(model_dim, output_dim)
-        
+
     def forward(self, x, mask=None):
         """
         Args:
             x: mel-spectrogram [B, 80, T]
-            mask: padding mask [B, 1, T]
+            mask: padding mask [B, 1, T] (not used in Tortoise version)
         Returns:
             speaker embedding [B, output_dim]
         """
         # Initial conv
         h = self.init(x)  # [B, model_dim, T]
-        h = h.transpose(1, 2)  # [B, T, model_dim]
         
         # Apply attention blocks
-        for block in self.blocks:
-            h, _ = block(h, mask)
+        h = self.attn(h)  # [B, model_dim, T]
         
-        # Pool over time (take first position like Tortoise)
-        # Could also use mean pooling
-        output = h[:, 0, :]  # [B, model_dim]
+        # Pooling - Tortoise uses first position
+        if self.mean_pooling:
+            if mask is not None:
+                # Masked mean pooling
+                h_masked = h * mask
+                h_sum = h_masked.sum(dim=2)
+                mask_sum = mask.sum(dim=2).clamp(min=1)
+                h_pooled = h_sum / mask_sum
+            else:
+                h_pooled = h.mean(dim=2)
+        else:
+            # Use first position like Tortoise
+            h_pooled = h[:, :, 0]
         
         # Project to output dimension
-        output = self.output_proj(output)  # [B, output_dim]
+        output = self.output_proj(h_pooled)  # [B, output_dim]
         
         return F.normalize(output, p=2, dim=1)
+
 
 class TransformerLM(torch.nn.Module):
     def __init__(
@@ -163,19 +165,19 @@ class TransformerLM(torch.nn.Module):
         
         if self.use_speaker_encoder and 'reference_mels' in batch:
             reference_mels = batch['reference_mels'].to(device)
-            
+            print('reference_mels shape: ', reference_mels.shape)
             # Handle multiple references
             if reference_mels.dim() == 4:  # [B, N, T, 80]
-                B, N, T, D = reference_mels.shape
+                B, N, C, T = reference_mels.shape
                 conds = []
                 
                 for i in range(N):
-                    ref_mel = reference_mels[:, i, :, :].transpose(1, 2)  # [B, 80, T]
+                    ref_mel = reference_mels[:, i, :, :]
                     if 'reference_mel_masks' in batch:
                         mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
                     else:
                         mask = None
-                    
+                    print('ref_mel shape: ', ref_mel.shape, 'mask: ', mask.shape)
                     cond = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]
                     conds.append(cond)
                 
@@ -547,42 +549,42 @@ class Qwen2LM(TransformerLM):
         lm_target = pad_sequence(lm_target, batch_first=True, padding_value=IGNORE_ID)
         return lm_target, lm_input, lm_input_len
 
-    def forward(
-            self,
-            batch: dict,
-            device: torch.device,
-    ) -> Dict[str, Optional[torch.Tensor]]:
-        """
-        Args:
-            text: (B, L, D)
-            text_lengths: (B,)
-            audio: (B, T, N) or (B, T)
-            audio_lengths: (B,)
-        """
-        text_token = batch['text_token'].to(device)
-        text_token_len = batch['text_token_len'].to(device)
-        speech_token = batch['speech_token'].to(device)
-        speech_token_len = batch['speech_token_len'].to(device)
+    # def forward(
+    #         self,
+    #         batch: dict,
+    #         device: torch.device,
+    # ) -> Dict[str, Optional[torch.Tensor]]:
+    #     """
+    #     Args:
+    #         text: (B, L, D)
+    #         text_lengths: (B,)
+    #         audio: (B, T, N) or (B, T)
+    #         audio_lengths: (B,)
+    #     """
+    #     text_token = batch['text_token'].to(device)
+    #     text_token_len = batch['text_token_len'].to(device)
+    #     speech_token = batch['speech_token'].to(device)
+    #     speech_token_len = batch['speech_token_len'].to(device)
 
 
-        # 1. encode text_token
-        text_token_emb = self.llm.model.model.embed_tokens(text_token)
+    #     # 1. encode text_token
+    #     text_token_emb = self.llm.model.model.embed_tokens(text_token)
 
-        # 2. encode speech_token
-        speech_token_emb = self.speech_embedding(speech_token)
+    #     # 2. encode speech_token
+    #     speech_token_emb = self.speech_embedding(speech_token)
 
-        # 3. prepare llm_input/target
-        lm_target, lm_input, lm_input_len = self.prepare_lm_input_target(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len)
-        lm_target = lm_target.to(device)
+    #     # 3. prepare llm_input/target
+    #     lm_target, lm_input, lm_input_len = self.prepare_lm_input_target(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len)
+    #     lm_target = lm_target.to(device)
 
-        # 4. run lm forward
-        lm_output, lm_output_mask = self.llm(lm_input, lm_input_len.to(device))
-        logits = self.llm_decoder(lm_output)
-        loss = self.criterion_ce(logits, lm_target.to(device))
-        acc = th_accuracy(logits.view(-1, self.speech_token_size + 3), lm_target, ignore_label=IGNORE_ID)
-        return {'loss': loss, 'acc': acc}
+    #     # 4. run lm forward
+    #     lm_output, lm_output_mask = self.llm(lm_input, lm_input_len.to(device))
+    #     logits = self.llm_decoder(lm_output)
+    #     loss = self.criterion_ce(logits, lm_target.to(device))
+    #     acc = th_accuracy(logits.view(-1, self.speech_token_size + 3), lm_target, ignore_label=IGNORE_ID)
+    #     return {'loss': loss, 'acc': acc}
     
-    def forward_spk(
+    def forward(
             self,
             batch: dict,
             device: torch.device,

@@ -210,6 +210,10 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         only_mask_loss: bool = True,
         token_mel_ratio: int = 2,
         pre_lookahead_len: int = 3,
+        use_speaker_encoder: bool = False,  # Add this
+        freeze_speaker_encoder: bool = False,  # Add this
+        max_conditioning_inputs: int = 2,  # Add this
+        speaker_encoder_path: str = None,
         encoder: torch.nn.Module = None,
         decoder: torch.nn.Module = None,
         decoder_conf: Dict = {
@@ -261,6 +265,60 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         self.input_frame_rate = input_frame_rate
         logging.info(f"input frame rate={self.input_frame_rate}")
         self.input_embedding = nn.Embedding(vocab_size, input_size)
+        self.use_speaker_encoder = use_speaker_encoder
+        # Speaker encoder setup
+        if use_speaker_encoder:
+            from cosyvoice.llm.llm import LearnableSpeakerEncoder
+            self.speaker_encoder = LearnableSpeakerEncoder(
+                mel_dim=80,
+                model_dim=512,
+                output_dim=spk_embed_dim,
+                num_blocks=6,
+                num_heads=8,
+            )
+            
+            # Load speaker encoder weights from LLM checkpoint if provided
+        if speaker_encoder_path is not None:
+            logging.info(f"Loading speaker encoder from {speaker_encoder_path}")
+            checkpoint = torch.load(speaker_encoder_path, map_location='cpu')
+            
+            # Debug: print checkpoint structure
+            print(f'Checkpoint keys: {checkpoint.keys()}')
+            
+            # Extract speaker encoder weights
+            speaker_encoder_state = {}
+            
+            # Check if checkpoint has 'state_dict' key or direct model weights
+            if 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            else:
+                # Direct model weights (based on your save function)
+                state_dict = {k: v for k, v in checkpoint.items() if not k in ['epoch', 'step']}
+            
+            # Extract speaker encoder weights
+            for key, value in state_dict.items():
+                if 'speaker_encoder.' in key:
+                    # Remove module. prefix if exists (from DDP)
+                    new_key = key.replace('module.', '')
+                    # Remove speaker_encoder. prefix to match the local module
+                    new_key = new_key.replace('speaker_encoder.', '')
+                    speaker_encoder_state[new_key] = value
+            
+            if len(speaker_encoder_state) == 0:
+                logging.warning("No speaker encoder weights found in checkpoint!")
+                logging.warning(f"Available keys: {list(state_dict.keys())[:10]}...")  # Show first 10 keys
+            else:
+                logging.info(f"Found {len(speaker_encoder_state)} speaker encoder weights")
+                # Load the weights
+                self.speaker_encoder.load_state_dict(speaker_encoder_state, strict=True)
+                logging.info("Speaker encoder loaded successfully")
+        self.freeze_speaker_encoder = freeze_speaker_encoder
+        if freeze_speaker_encoder:
+            # Freeze speaker encoder parameters
+            for param in self.speaker_encoder.parameters():
+                param.requires_grad = False
+            logging.info("Speaker encoder frozen in flow matching")
+
         self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, output_size)
         self.encoder = encoder
         self.encoder_proj = torch.nn.Linear(self.encoder.output_size(), output_size)
@@ -271,6 +329,55 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         print(" decoder_conf['cfm_params']: ", decoder_conf["cfm_params"])
         self.use_contrastive_fm = decoder_conf["cfm_params"]["use_contrastive_fm"]
 
+    def get_speaker_embedding(self, batch, device):
+        """Extract speaker embedding from reference mels or use provided embeddings"""
+        
+        if self.use_speaker_encoder and 'reference_mels' in batch:
+            reference_mels = batch['reference_mels'].to(device)
+            
+            # Handle multiple references
+            if reference_mels.dim() == 4:  # [B, N, C, T]
+                B, N, C, T = reference_mels.shape
+                embeddings = []
+                
+                for i in range(N):
+                    ref_mel = reference_mels[:, i, :, :]  # [B, C, T]
+                    if 'reference_mel_masks' in batch:
+                        mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
+                    else:
+                        mask = None
+                    print('ref_mel mask: ', ref_mel.shape, mask.shape)
+                    # Apply speaker encoder
+                    with torch.set_grad_enabled(not self.freeze_speaker_encoder):
+                        emb = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]
+                    embeddings.append(emb)
+                
+                # Average multiple references
+                embedding = torch.stack(embeddings, dim=1).mean(dim=1)  # [B, spk_embed_dim]
+                
+            else:  # Single reference [B, C, T]
+                if 'reference_mel_mask' in batch:
+                    mask = batch['reference_mel_mask'].unsqueeze(1).to(device)
+                else:
+                    mask = None
+                
+                with torch.set_grad_enabled(not self.freeze_speaker_encoder):
+                    embedding = self.speaker_encoder(reference_mels, mask)
+            
+            # Normalize (already normalized in speaker encoder, but just to be safe)
+            embedding = F.normalize(embedding, dim=1)
+            
+        elif 'embedding' in batch:
+            # Use provided embeddings (backward compatibility)
+            embedding = batch['embedding'].to(device)
+            embedding = F.normalize(embedding, dim=1)
+        else:
+            # No speaker conditioning
+            B = batch['speech_token'].shape[0]
+            embedding = torch.zeros(B, self.spk_embed_dim).to(device)
+            
+        return embedding
+
     def forward(
         self,
         batch: dict,
@@ -280,10 +387,11 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         token_len = batch["speech_token_len"].to(device)
         feat = batch["speech_feat"].to(device)
         feat_len = batch["speech_feat_len"].to(device)
-        embedding = batch["embedding"].to(device)
 
         # NOTE unified training, static_chunk_size > 0 or = 0
         streaming = False  # if random.random() < 0.5 else False
+        print("get speaker embedding")
+        embedding = self.get_speaker_embedding(batch, device)
 
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
@@ -335,13 +443,29 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         prompt_token_len,
         prompt_feat,
         prompt_feat_len,
-        embedding,
-        streaming,
-        finalize,
+        embedding=None,
+        reference_mels=None,
+        reference_mel_lengths=None,
+        reference_mel_masks=None,
+        streaming=False,
+        finalize=False,
     ):
         assert token.shape[0] == 1
+        
+        # Get speaker embedding
+        if self.use_speaker_encoder and reference_mels is not None:
+            batch = {
+                'reference_mels': reference_mels,
+                'reference_mel_lengths': reference_mel_lengths,
+                'reference_mel_masks': reference_mel_masks
+            }
+            embedding = self.get_speaker_embedding(batch, token.device)
+        elif embedding is not None:
+            embedding = F.normalize(embedding, dim=1)
+        else:
+            embedding = torch.zeros(1, self.spk_embed_dim).to(token.device)
+        
         # xvec projection
-        embedding = F.normalize(embedding, dim=1)
         embedding = self.spk_embed_affine_layer(embedding)
 
         # concat text and prompt_text

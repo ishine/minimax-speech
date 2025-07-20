@@ -346,7 +346,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                         mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
                     else:
                         mask = None
-                    print('ref_mel mask: ', ref_mel.shape, mask.shape)
+                    # print('ref_mel mask: ', ref_mel.shape, mask.shape)
                     # Apply speaker encoder
                     with torch.set_grad_enabled(not self.freeze_speaker_encoder):
                         emb = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]

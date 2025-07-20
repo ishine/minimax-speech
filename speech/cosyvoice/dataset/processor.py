@@ -103,7 +103,7 @@ def individual_file_opener(data, mode='train', tts_data={}):
                 
                 # Load embeddings if they exist
                 if os.path.exists(file_info['embedding_path']):
-                    utt_embedding = torch.load(file_info['embedding_path'])
+                    utt_embedding = torch.load(file_info['embedding_path'], weights_only=False)
                     if isinstance(utt_embedding, torch.Tensor):
                         utt_embedding = utt_embedding.tolist()
                 else:
@@ -113,7 +113,7 @@ def individual_file_opener(data, mode='train', tts_data={}):
                 
                 # Load tokens if they exist
                 if os.path.exists(file_info['token_path']):
-                    speech_token = torch.load(file_info['token_path'])
+                    speech_token = torch.load(file_info['token_path'], weights_only=False)
                     if isinstance(speech_token, torch.Tensor):
                         speech_token = speech_token.tolist()
                 else:
@@ -122,7 +122,7 @@ def individual_file_opener(data, mode='train', tts_data={}):
                 
                 # Load speaker embedding
                 if os.path.exists(file_info['spk_embedding_path']):
-                    spk_embedding = torch.load(file_info['spk_embedding_path'])
+                    spk_embedding = torch.load(file_info['spk_embedding_path'], weights_only=False)
                     if isinstance(spk_embedding, torch.Tensor):
                         spk_embedding = spk_embedding.tolist()
                 else:
@@ -686,17 +686,6 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_spe
                     batch['reference_mels'] = padded_reference_mels
                     batch['reference_mel_lengths'] = padded_reference_mel_lengths
                     batch['reference_mel_masks'] = reference_mel_masks
-                else:
-                    # No valid mels, create dummy
-                    batch['reference_mels'] = torch.zeros(batch_size, 1, mel_dim, 100)
-                    batch['reference_mel_lengths'] = torch.zeros(batch_size, 1, dtype=torch.int32)
-                    batch['reference_mel_masks'] = torch.zeros(batch_size, 1, 100)
-            else:
-                # No references available, create dummy for batch
-                batch_size = len(order)
-                batch['reference_mels'] = torch.zeros(batch_size, 1, 80, 100)
-                batch['reference_mel_lengths'] = torch.zeros(batch_size, 1, dtype=torch.int32)
-                batch['reference_mel_masks'] = torch.zeros(batch_size, 1, 100)
         
         if gan is True:
             # in gan train, we need pitch_feat
@@ -725,10 +714,5 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_spe
                                                padding_value=0)
             batch['reject_speech_token'] = reject_speech_token
             batch['reject_speech_token_len'] = reject_speech_token_len
-            
-        if use_spk_embedding is True:
-            batch["embedding"] = batch["spk_embedding"]
-        else:
-            batch["embedding"] = batch["utt_embedding"]
             
         yield batch

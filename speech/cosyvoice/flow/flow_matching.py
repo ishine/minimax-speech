@@ -284,11 +284,8 @@ class ConditionalCFM(BASECFM):
                     perm[i] = (i + 1) % b
 
             # Get negative samples
-            x1_neg = x1[perm]
+            u_negative = u_positive[perm]
          
-            # KEY: Use the SAME z that created x_t (not new noise)
-            # This asks: "what if x_t came from x1_neg instead?"
-            u_negative = x1_neg - (1 - self.sigma_min) * z
         else:
             u_negative = u_positive
 

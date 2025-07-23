@@ -270,21 +270,10 @@ class ConditionalCFM(BASECFM):
             # sample noise p(x_0)
             z = torch.randn_like(x1)
 
-        y = (1 - (1 - self.sigma_min) * t) * z + t * x1
-        u = x1 - (1 - self.sigma_min) * z
+        x_t = (1 - (1 - self.sigma_min) * t) * z + t * x1
 
-        # during training, we randomly drop condition to trade off mode coverage and sample fidelity
-        if self.training_cfg_rate > 0:
-            cfg_mask = torch.rand(b, device=x1.device) > self.training_cfg_rate
-            mu = mu * cfg_mask.view(-1, 1, 1)
-            spks = spks * cfg_mask.view(-1, 1)
-            cond = cond * cfg_mask.view(-1, 1, 1)
-       
-        pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
-        fm_loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
+        u_positive = x1 - (1 - self.sigma_min) * z
 
-        
-        
         # Get negative targets from shifted indices
         if b > 1:
             perm = torch.randperm(b, device=x1.device)
@@ -296,32 +285,34 @@ class ConditionalCFM(BASECFM):
 
             # Get negative samples
             x1_neg = x1[perm]
-            mask_neg = mask[perm]
-            
-            # Generate independent noise for negatives
-            z_neg = torch.randn_like(x1_neg)
-            
-            # Compute negative velocities
-            u_neg = x1_neg - (1 - self.sigma_min) * z_neg
-            
-            # Contrastive loss
-            contrastive_loss = F.mse_loss(
-                pred * mask_neg, 
-                u_neg * mask_neg,
-                reduction="sum"
-            ) / (torch.sum(mask_neg) * d)
-
-            # print('before contrastive_loss: ', contrastive_loss)
+         
+            # KEY: Use the SAME z that created x_t (not new noise)
+            # This asks: "what if x_t came from x1_neg instead?"
+            u_negative = x1_neg - (1 - self.sigma_min) * z
         else:
-            contrastive_loss = torch.tensor(0.0, device=fm_loss.device)
-        # print("fm_loss: ", fm_loss)
-        
-        contrastive_loss = self.lambda_weight * contrastive_loss
-        # print('contrastive_loss: ', contrastive_loss)
-        
-        loss = fm_loss - contrastive_loss
+            u_negative = u_positive
 
-        return loss, y
+        # during training, we randomly drop condition to trade off mode coverage and sample fidelity
+        if self.training_cfg_rate > 0:
+            cfg_mask = torch.rand(b, device=x1.device) > self.training_cfg_rate
+            mu = mu * cfg_mask.view(-1, 1, 1)
+            spks = spks * cfg_mask.view(-1, 1)
+            cond = cond * cfg_mask.view(-1, 1, 1)
+
+        pred = self.estimator(x_t, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
+
+        positive_loss = F.mse_loss(pred * mask, u_positive * mask, reduction="sum") / (torch.sum(mask) * d)
+
+        if b > 1:
+            # Negative loss: pred should NOT match velocities from other trajectories
+            negative_loss = F.mse_loss(pred * mask, u_negative * mask, reduction="sum") / (torch.sum(mask) * d)
+        else:
+            negative_loss = torch.tensor(0.0, device=positive_loss.device)
+    
+        
+        loss = positive_loss - self.lambda_weight * negative_loss
+
+        return loss, x_t
 
 
 class CausalConditionalCFM(ConditionalCFM):

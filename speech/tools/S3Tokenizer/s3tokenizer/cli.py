@@ -32,7 +32,6 @@ torchrun --nproc_per_node=8 --nnodes=1 \
 
 import argparse
 import os
-from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -50,12 +49,10 @@ class AudioDataset(Dataset):
         
         # Define cache file path
         if cache_file is None:
-            cache_file = Path(root_path) / '.audio_file_cache.pkl'
-        else:
-            cache_file = Path(cache_file)
+            cache_file = os.path.join(root_path, '.audio_file_cache.pkl')
         
         # Try to load from cache first
-        if use_cache and cache_file.exists():
+        if use_cache and os.path.exists(cache_file):
             import pickle
             print(f"Loading file list from cache: {cache_file}")
             try:
@@ -80,7 +77,7 @@ class AudioDataset(Dataset):
                 with os.scandir(dirpath) as entries:
                     for entry in entries:
                         if entry.is_file() and any(entry.name.endswith(ext) for ext in extensions):
-                            files.append(Path(entry.path))
+                            files.append(entry.path)
             except PermissionError:
                 pass
             return files
@@ -112,7 +109,10 @@ class AudioDataset(Dataset):
             try:
                 import pickle
                 print(f"Saving file list to cache: {cache_file}")
-                cache_file.parent.mkdir(exist_ok=True)
+                # Ensure parent directory exists
+                cache_dir = os.path.dirname(cache_file)
+                if cache_dir and not os.path.exists(cache_dir):
+                    os.makedirs(cache_dir, exist_ok=True)
                 with open(cache_file, 'wb') as f:
                     pickle.dump(self.data, f)
             except Exception as e:
@@ -124,7 +124,7 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         file_path = self.data[idx]
         try:
-            audio = s3tokenizer.load_audio(str(file_path))
+            audio = s3tokenizer.load_audio(file_path)
             mel = s3tokenizer.log_mel_spectrogram(audio)
             return file_path, mel
         except Exception as e:
@@ -219,8 +219,8 @@ def get_args():
 def save_tokens(file_path, codes, codes_len):
     """Save tokens as .pt file with _fsq suffix"""
     # Remove extension and add _fsq.pt
-    output_path = file_path.with_suffix('').with_suffix('.pt')
-    output_path = output_path.parent / f"{output_path.stem}_fsq.pt"
+    base_name = os.path.splitext(file_path)[0]
+    output_path = f"{base_name}_fsq.pt"
     
     # Extract only valid codes (up to codes_len)
     valid_codes = codes[:codes_len]
@@ -248,11 +248,11 @@ def main():
         # Option 3: Load from pre-generated file list
         print(f"Loading file list from: {args.file_list}")
         with open(args.file_list, 'r') as f:
-            file_paths = [Path(line.strip()) for line in f if line.strip()]
-        
-        # Filter by extensions if specified
-        if args.extensions:
-            file_paths = [f for f in file_paths if any(str(f).endswith(ext) for ext in args.extensions)]
+            file_paths = []
+            for line in f:
+                line = line.strip()
+                if line:
+                    file_paths.append(line)
         
         # Create a simple dataset
         class FileListDataset(Dataset):
@@ -261,9 +261,9 @@ def main():
                 skipped_existing = 0
                 for fp in file_paths:
                     if skip_existing:
-                        output_path = fp.with_suffix('').with_suffix('.pt')
-                        output_path = output_path.parent / f"{output_path.stem}_fsq.pt"
-                        if output_path.exists():
+                        output_path = fp.replace('.wav', '_fsq.pt')
+                        if os.path.exists(output_path):
+                            print(f'*******skip file {output_path}')
                             skipped_existing += 1
                             continue
                     self.data.append(fp)
@@ -278,17 +278,13 @@ def main():
                 file_path = self.data[idx]
                 try:
                     # Check if file exists
-                    if not file_path.exists():
+                    if not os.path.exists(file_path):
                         print(f"File not found: {file_path}")
                         return None, None
-                    
-                    # Check if it's a file (not directory)
-                    if not file_path.is_file():
-                        print(f"Not a file: {file_path}")
-                        return None, None
+
                     
                     # Try to load audio
-                    audio = s3tokenizer.load_audio(str(file_path))
+                    audio = s3tokenizer.load_audio(file_path)
                     mel = s3tokenizer.log_mel_spectrogram(audio)
                     return file_path, mel
                 except Exception as e:
@@ -311,7 +307,7 @@ def main():
             original_count = len(dataset.data)
             dataset.data = [
                 fp for fp in dataset.data
-                if not (fp.parent / f"{fp.stem}_fsq.pt").exists()
+                if not os.path.exists(os.path.join(os.path.dirname(fp), f"{os.path.splitext(os.path.basename(fp))[0]}_fsq.pt"))
             ]
             print(f"Skipping {original_count - len(dataset.data)} already processed files")
 
@@ -363,7 +359,7 @@ def main():
                 processed_count += 1
             except Exception as e:
                 failed_count += 1
-                failed_files.append(str(file_path))
+                failed_files.append(file_path)
                 if rank == 0:
                     tqdm.write(f"Failed to save {file_path}: {e}")
         
@@ -377,7 +373,7 @@ def main():
             print(f"Failed to process {failed_count} files")
             
             # Save failed files list
-            failed_list_path = Path(args.root_path if not args.file_list else ".") / "failed_files.txt"
+            failed_list_path = os.path.join(args.root_path if not args.file_list else ".", "failed_files.txt")
             with open(failed_list_path, 'w') as f:
                 for ff in failed_files:
                     f.write(f"{ff}\n")

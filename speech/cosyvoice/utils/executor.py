@@ -78,6 +78,10 @@ class Executor:
             info_dict["epoch"] = self.epoch
             info_dict["batch_idx"] = batch_idx
 
+            for key, value in batch_dict.items():
+                if isinstance(value, torch.Tensor):
+                    print(f'{key} {value.shape}')
+
 
             if use_ddp and (batch_idx + 1) % info_dict["accum_grad"] != 0:
                 context = model.no_sync
@@ -86,6 +90,7 @@ class Executor:
 
 
             with context():
+                logger.info(f'{self.rank} batch_forward')
                 info_dict = batch_forward(
                     model,
                     batch_dict,
@@ -94,12 +99,13 @@ class Executor:
                     ref_model=self.ref_model,
                     dpo_loss=self.dpo_loss,
                 )
-
+                logger.info(f'{self.rank} batch_backward')
                 info_dict = batch_backward(model, scaler, info_dict)
-
+            logger.info(f'{self.rank} update_parameter_and_lr')
             info_dict = update_parameter_and_lr(
                 model, optimizer, scheduler, scaler, info_dict, model_type=model_type
             )
+            logger.info(f'{self.rank} log_per_step')
             log_per_step(experiment, info_dict)
 
             if (

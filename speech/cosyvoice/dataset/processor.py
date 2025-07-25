@@ -24,17 +24,15 @@ import pyworld as pw
 import glob
 import os
 import json
-
+import traceback
 AUDIO_FORMAT_SETS = {'flac', 'mp3', 'm4a', 'ogg', 'opus', 'wav', 'wma'}
 
 
-def individual_file_opener(data, mode='train', tts_data={}):
-    """Load data from individual files instead of parquet
+def individual_file_opener(data, mode='train', tts_data={}, token_latent_ratio=3):
+    """Load data from individual files listed in files.txt
     
     Args:
-        data: Iterable[{src}] where src is either:
-            - Path to a directory containing audio files
-            - Path to a JSON index file
+        data: Iterable[{src}] where src is path to files.txt containing audio paths
         mode: 'train' or 'test'
         tts_data: Dict for TTS mode
         
@@ -45,50 +43,92 @@ def individual_file_opener(data, mode='train', tts_data={}):
         assert 'src' in sample
         src = sample['src']
         
-        # Determine if src is a directory or index file
-        if src.endswith('.json'):
-            # Load from index file
+        # Load file list from files.txt
+        file_list = []
+        
+        # Check if src is a files.txt file
+        if src.endswith('.txt'):
             with open(src, 'r') as f:
-                index_data = json.load(f)
-                file_list = index_data.get('data', [])
-        else:
-            # Scan directory for wav files
-            wav_files = glob.glob(os.path.join(src, '*/*/*wav'))
-            if not wav_files:
-                # Try different patterns
-                wav_files = glob.glob(os.path.join(src, '**/*.wav'), recursive=True)
+                wav_files = [line.strip() for line in f if line.strip()]
             
-            file_list = []
             for wav_path in wav_files:
+                # Skip empty lines or comments
+                if not wav_path or wav_path.startswith('#'):
+                    continue
+                    
+                # Verify wav file exists
+                if not os.path.exists(wav_path):
+                    logging.warning(f'Audio file not found: {wav_path}, skipping')
+                    continue
+                
                 # Check if all required files exist
-                txt_path = wav_path.replace('.wav', '.normalized.txt')
-                embedding_path = wav_path.replace('.wav', '_embedding.pt')
-                token_path = wav_path.replace('.wav', '_tokens.pt')
+                txt_path = wav_path.replace('.wav', '.txt')
+                token_path = wav_path.replace('.wav', '_fsq.pt')
+                latent_path = wav_path.replace('.wav', '_latent.pt')
                 
                 if not os.path.exists(txt_path):
                     logging.warning(f'Text file not found for {wav_path}, skipping')
                     continue
                 
+                if not os.path.exists(token_path):
+                    logging.warning(f'Token file not found for {wav_path}, skipping')
+                    continue
+                    
+                if not os.path.exists(latent_path):
+                    logging.warning(f'Latent file not found for {wav_path}, skipping')
+                    continue
+                
                 # Extract metadata
                 utt = os.path.basename(wav_path).replace('.wav', '')
-                spk = utt.split('_')[0]
-                
-                # Find speaker embedding
-                spk_embed_dir = os.path.join(os.path.dirname(src), 'spk_embeddings')
-                if not os.path.exists(spk_embed_dir):
-                    spk_embed_dir = os.path.join(src, 'spk_embeddings')
-                spk_embedding_path = os.path.join(spk_embed_dir, f'{spk}_embedding.pt')
+                # Try to extract speaker from filename (assuming format: spk_*.wav)
+                spk = utt.split('_')[0] if '_' in utt else 'default'
                 
                 file_info = {
                     'utt': utt,
                     'spk': spk,
                     'wav': wav_path,
                     'text_path': txt_path,
-                    'embedding_path': embedding_path,
                     'token_path': token_path,
-                    'spk_embedding_path': spk_embedding_path
+                    'latent_path': latent_path,
+                }
+                logging.info(f'file_info {file_info}')
+                file_list.append(file_info)
+        
+        elif src.endswith('.json'):
+            # Keep backward compatibility with JSON index files
+            with open(src, 'r') as f:
+                index_data = json.load(f)
+                file_list = index_data.get('data', [])
+        
+        else:
+            # Assume it's a directory for backward compatibility
+            wav_files = glob.glob(os.path.join(src, '*/*/*wav'))
+            if not wav_files:
+                wav_files = glob.glob(os.path.join(src, '**/*.wav'), recursive=True)
+            
+            for wav_path in wav_files:
+                txt_path = wav_path.replace('.wav', '.txt')
+                token_path = wav_path.replace('.wav', '_fsq.pt')
+                latent_path = wav_path.replace('.wav', '_latent.pt')
+                
+                if not os.path.exists(txt_path):
+                    logging.warning(f'Text file not found for {wav_path}, skipping')
+                    continue
+                
+                utt = os.path.basename(wav_path).replace('.wav', '')
+                spk = utt.split('_')[0]
+                
+                file_info = {
+                    'utt': utt,
+                    'spk': spk,
+                    'wav': wav_path,
+                    'text_path': txt_path,
+                    'token_path': token_path,
+                    'latent_path': latent_path,
                 }
                 file_list.append(file_info)
+        
+        logging.info(f'Found {len(file_list)} valid audio files from {src}')
         
         # Process each file
         for file_info in file_list:
@@ -98,38 +138,24 @@ def individual_file_opener(data, mode='train', tts_data={}):
                     audio_data = f.read()
                 
                 # Read text
-                with open(file_info['text_path'], 'r') as f:
+                with open(file_info['text_path'], 'r', encoding='utf-8') as f:
                     text = ''.join(l.strip() for l in f.readlines())
                 
-                # Load embeddings if they exist
-                if os.path.exists(file_info['embedding_path']):
-                    utt_embedding = torch.load(file_info['embedding_path'], weights_only=False)
-                    if isinstance(utt_embedding, torch.Tensor):
-                        utt_embedding = utt_embedding.tolist()
-                else:
-                    logging.warning(f"Utterance embedding not found: {file_info['embedding_path']}")
-                    # Create a dummy embedding
-                    utt_embedding = [0.0] * 192  # Assuming 192-dim embeddings
-                
-                # Load tokens if they exist
-                if os.path.exists(file_info['token_path']):
-                    speech_token = torch.load(file_info['token_path'], weights_only=False)
-                    if isinstance(speech_token, torch.Tensor):
-                        speech_token = speech_token.tolist()
-                else:
-                    logging.warning(f"Token file not found: {file_info['token_path']}")
-                    speech_token = []
-                
-                # Load speaker embedding
-                if os.path.exists(file_info['spk_embedding_path']):
-                    spk_embedding = torch.load(file_info['spk_embedding_path'], weights_only=False)
-                    if isinstance(spk_embedding, torch.Tensor):
-                        spk_embedding = spk_embedding.tolist()
-                else:
-                    logging.warning(f"Speaker embedding not found: {file_info['spk_embedding_path']}")
-                    # Use utterance embedding as fallback
-                    spk_embedding = utt_embedding
-                
+                # Load speech token
+                speech_token = torch.load(file_info['token_path'], map_location='cpu', weights_only=False)
+                if isinstance(speech_token, torch.Tensor):
+                    speech_token = speech_token.tolist()
+
+                # Load speech latent
+                speech_latent = torch.load(file_info['latent_path'], map_location='cpu', weights_only=False)
+                speech_latent = speech_latent['z'].transpose(0, 1)
+
+                if token_latent_ratio != 0:
+                    # trim to align speech_token and speech_feat
+                    token_len = int(min(speech_latent.shape[0] / token_latent_ratio, len(speech_token)))
+                    speech_latent = speech_latent[:token_latent_ratio * token_len]
+                    speech_token = speech_token[:token_len]
+
                 # Build sample dict
                 sample_dict = {
                     'utt': file_info['utt'],
@@ -137,10 +163,9 @@ def individual_file_opener(data, mode='train', tts_data={}):
                     'audio_data': audio_data,
                     'text': text,
                     'text_token': [],  # Will be filled by tokenize processor
-                    'utt_embedding': utt_embedding,
-                    'spk_embedding': spk_embedding,
                     'speech_token': speech_token,
                     'wav': file_info['wav'],  # Keep original path for reference
+                    'speech_latent': speech_latent,
                 }
                 
                 # Copy over any additional fields from the original sample
@@ -237,8 +262,10 @@ def filter(data,
             continue
         if num_frames != 0:
             if len(sample['text_token']) / num_frames < min_output_input_ratio:
+                print('continue text_token')
                 continue
             if len(sample['text_token']) / num_frames > max_output_input_ratio:
+                print('continue text_token')
                 continue
         yield sample
 
@@ -261,6 +288,7 @@ def resample(data, resample_rate=22050, min_sample_rate=16000, mode='train'):
         waveform = sample['speech']
         if sample_rate != resample_rate:
             if sample_rate < min_sample_rate:
+                print('continue sample_rate')
                 continue
             sample['sample_rate'] = resample_rate
             sample['speech'] = torchaudio.transforms.Resample(
@@ -289,43 +317,6 @@ def truncate(data, truncate_length=24576, mode='train'):
         else:
             waveform = torch.concat([waveform, torch.zeros(1, truncate_length - waveform.shape[1])], dim=1)
         sample['speech'] = waveform
-        yield sample
-
-
-def compute_fbank(data,
-                  feat_extractor,
-                  token_mel_ratio=0,
-                  mode='train'):
-    """ Extract fbank
-
-        Args:
-            data: Iterable[{key, wav, label, sample_rate}]
-
-        Returns:
-            Iterable[{key, feat, label}]
-    """
-    for sample in data:
-        assert 'sample_rate' in sample
-        assert 'speech' in sample
-        assert 'utt' in sample
-        assert 'text_token' in sample
-        waveform = sample['speech']
-        feat = feat_extractor(waveform).squeeze(dim=0).transpose(0, 1)
-        if token_mel_ratio != 0:
-            
-            if isinstance(sample["speech_token"], list):
-                speech_token_tensor = torch.tensor(sample["speech_token"])
-            else:
-                speech_token_tensor = sample["speech_token"]
-            
-            # trim to align speech_token and speech_feat
-            token_len = int(min(feat.shape[0] / token_mel_ratio, speech_token_tensor.shape[0]))
-            feat = feat[:token_mel_ratio * token_len]
-            
-            # Update speech_token - keep as tensor for consistency
-            sample["speech_token"] = speech_token_tensor[:token_len]
-
-        sample['speech_feat'] = feat
         yield sample
 
 
@@ -361,6 +352,7 @@ def extract_reference_mel_from_speech(
             sample['reference_mels'] = []
             sample['reference_mel_lengths'] = []
             sample['num_references'] = 0
+            print('continue num_references')
             yield sample
             continue
         
@@ -401,48 +393,6 @@ def extract_reference_mel_from_speech(
         sample['reference_mel_lengths'] = reference_mel_lengths
         sample['num_references'] = len(reference_mels)
         
-        yield sample
-
-def compute_f0(data, sample_rate, hop_size, mode='train'):
-    """ Extract f0
-
-        Args:
-            data: Iterable[{key, wav, label, sample_rate}]
-
-        Returns:
-            Iterable[{key, feat, label}]
-    """
-    frame_period = hop_size * 1000 / sample_rate
-    for sample in data:
-        assert 'sample_rate' in sample
-        assert 'speech' in sample
-        assert 'utt' in sample
-        assert 'text_token' in sample
-        waveform = sample['speech']
-        _f0, t = pw.harvest(waveform.squeeze(dim=0).numpy().astype('double'), sample_rate, frame_period=frame_period)
-        if sum(_f0 != 0) < 5:  # this happens when the algorithm fails
-            _f0, t = pw.dio(waveform.squeeze(dim=0).numpy().astype('double'), sample_rate, frame_period=frame_period)  # if harvest fails, try dio
-        f0 = pw.stonemask(waveform.squeeze(dim=0).numpy().astype('double'), _f0, t, sample_rate)
-        f0 = F.interpolate(torch.from_numpy(f0).view(1, 1, -1), size=sample['speech_feat'].shape[0], mode='linear').view(-1)
-        sample['pitch_feat'] = f0
-        yield sample
-
-
-def parse_embedding(data, normalize, mode='train'):
-    """ Parse utt_embedding/spk_embedding
-
-        Args:
-            data: Iterable[{key, wav, label, sample_rate}]
-
-        Returns:
-            Iterable[{key, feat, label}]
-    """
-    for sample in data:
-        sample['utt_embedding'] = torch.tensor(sample['utt_embedding'], dtype=torch.float32)
-        sample['spk_embedding'] = torch.tensor(sample['spk_embedding'], dtype=torch.float32)
-        if normalize:
-            sample['utt_embedding'] = F.normalize(sample['utt_embedding'], dim=0)
-            sample['spk_embedding'] = F.normalize(sample['spk_embedding'], dim=0)
         yield sample
 
 
@@ -505,12 +455,12 @@ def sort(data, sort_size=500, mode='train'):
     for sample in data:
         buf.append(sample)
         if len(buf) >= sort_size:
-            buf.sort(key=lambda x: x['speech_feat'].size(0))
+            buf.sort(key=lambda x: x['speech_latent'].size(0))
             for x in buf:
                 yield x
             buf = []
     # The sample left over
-    buf.sort(key=lambda x: x['speech_feat'].size(0))
+    buf.sort(key=lambda x: x['speech_latent'].size(0))
     for x in buf:
         yield x
 
@@ -549,9 +499,9 @@ def dynamic_batch(data, max_frames_in_batch=12000, mode='train'):
     buf = []
     longest_frames = 0
     for sample in data:
-        assert 'speech_feat' in sample
-        assert isinstance(sample['speech_feat'], torch.Tensor)
-        new_sample_frames = sample['speech_feat'].size(0)
+        assert 'speech_latent' in sample
+        assert isinstance(sample['speech_latent'], torch.Tensor)
+        new_sample_frames = sample['speech_latent'].size(0)
         longest_frames = max(longest_frames, new_sample_frames)
         frames_after_padding = longest_frames * (len(buf) + 1)
         if frames_after_padding > max_frames_in_batch:
@@ -574,7 +524,7 @@ def batch(data, batch_type='static', batch_size=16, max_frames_in_batch=12000, m
     else:
         logging.fatal('Unsupported batch type {}'.format(batch_type))
 
-def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_speaker_encoder=False):
+def padding(data, mode='train', gan=False, dpo=False, use_speaker_encoder=False):
     """ Padding the data into training data
 
         Args:
@@ -586,9 +536,9 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_spe
     """
     for sample in data:
         assert isinstance(sample, list)
-        speech_feat_len = torch.tensor([x['speech_feat'].size(0) for x in sample],  # Changed from size(1) to size(0)
+        speech_latent_len = torch.tensor([x['speech_latent'].size(0) for x in sample],  # Changed from size(1) to size(0)
                                        dtype=torch.int32)
-        order = torch.argsort(speech_feat_len, descending=True)
+        order = torch.argsort(speech_latent_len, descending=True)
 
         utts = [sample[i]['utt'] for i in order]
         speech = [sample[i]['speech'].squeeze(dim=0) for i in order]
@@ -607,17 +557,16 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_spe
                                     batch_first=True,
                                     padding_value=0)
         
-        speech_feat = [sample[i]['speech_feat'] for i in order]
-        speech_feat_len = torch.tensor([i.size(0) for i in speech_feat], dtype=torch.int32)
-        speech_feat = pad_sequence(speech_feat,
+        speech_latent = [sample[i]['speech_latent'] for i in order]
+
+        speech_latent = pad_sequence(speech_latent,
                                    batch_first=True,
                                    padding_value=0)
+
         text = [sample[i]['text'] for i in order]
         text_token = [torch.tensor(sample[i]['text_token']) for i in order]
         text_token_len = torch.tensor([i.size(0) for i in text_token], dtype=torch.int32)
         text_token = pad_sequence(text_token, batch_first=True, padding_value=0)
-        utt_embedding = torch.stack([sample[i]['utt_embedding'] for i in order], dim=0)
-        spk_embedding = torch.stack([sample[i]['spk_embedding'] for i in order], dim=0)
         
         batch = {
             "utts": utts,
@@ -625,13 +574,11 @@ def padding(data, use_spk_embedding, mode='train', gan=False, dpo=False, use_spe
             "speech_len": speech_len,
             "speech_token": speech_token,
             "speech_token_len": speech_token_len,
-            "speech_feat": speech_feat,
-            "speech_feat_len": speech_feat_len,
+            "speech_latent": speech_latent,
+            "speech_latent_len": speech_latent,
             "text": text,
             "text_token": text_token,
             "text_token_len": text_token_len,
-            "utt_embedding": utt_embedding,
-            "spk_embedding": spk_embedding,
         }
         
         # Handle reference mels for speaker encoder

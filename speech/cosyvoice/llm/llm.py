@@ -162,51 +162,28 @@ class TransformerLM(torch.nn.Module):
 
     def get_speaker_conditioning(self, batch, device):
         """Extract speaker conditioning from reference audio or embeddings."""
+    
+        reference_mels = batch['reference_mels'].to(device)
+        # Handle multiple references
+        B, N, C, T = reference_mels.shape
+        conds = []
         
-        if self.use_speaker_encoder and 'reference_mels' in batch:
-            reference_mels = batch['reference_mels'].to(device)
-            print('reference_mels shape: ', reference_mels.shape)
-            # Handle multiple references
-            if reference_mels.dim() == 4:  # [B, N, T, 80]
-                B, N, C, T = reference_mels.shape
-                conds = []
-                
-                for i in range(N):
-                    ref_mel = reference_mels[:, i, :, :]
-                    if 'reference_mel_masks' in batch:
-                        mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
-                    else:
-                        mask = None
-                    print('ref_mel shape: ', ref_mel.shape, 'mask: ', mask.shape)
-                    cond = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]
-                    conds.append(cond)
-                
-                # Average multiple references (like Tortoise)
-                speaker_embed = torch.stack(conds, dim=1).mean(dim=1)  # [B, spk_embed_dim]
-                
-            else:  # Single reference [B, T, 80]
-                ref_mel = reference_mels.transpose(1, 2)  # [B, 80, T]
-                if 'reference_mel_mask' in batch:
-                    mask = batch['reference_mel_mask'].unsqueeze(1).to(device)
-                else:
-                    mask = None
-                speaker_embed = self.speaker_encoder(ref_mel, mask)
-            
-            # Project to LLM dimension
-            speaker_embed = self.spk_embed_affine_layer(speaker_embed)
-            speaker_embed = speaker_embed.unsqueeze(1)  # [B, 1, llm_input_size]
-            
-        elif 'embedding' in batch:
-            # Use provided embeddings (backward compatibility)
-            embedding = batch['embedding'].to(device)
-            embedding = F.normalize(embedding, dim=1)
-            speaker_embed = self.spk_embed_affine_layer(embedding)
-            speaker_embed = speaker_embed.unsqueeze(1)
-            
-        else:
-            # No speaker conditioning
-            B = batch['text_token'].shape[0]
-            speaker_embed = torch.zeros(B, 1, self.llm_input_size).to(device)
+        for i in range(N):
+            ref_mel = reference_mels[:, i, :, :]
+            if 'reference_mel_masks' in batch:
+                mask = batch['reference_mel_masks'][:, i, :].unsqueeze(1).to(device)
+            else:
+                mask = None
+            print('ref_mel shape: ', ref_mel.shape, 'mask: ', mask.shape)
+            cond = self.speaker_encoder(ref_mel, mask)  # [B, spk_embed_dim]
+            conds.append(cond)
+        
+        # Average multiple references (like Tortoise)
+        speaker_embed = torch.stack(conds, dim=1).mean(dim=1)  # [B, spk_embed_dim]
+
+        speaker_embed = F.normalize(speaker_embed, dim=1)
+        speaker_embed = self.spk_embed_affine_layer(speaker_embed)
+        speaker_embed = speaker_embed.unsqueeze(1)  # [B, 1, llm_input_size]
             
         return speaker_embed
 
@@ -548,41 +525,6 @@ class Qwen2LM(TransformerLM):
         lm_input = pad_sequence(lm_input, batch_first=True, padding_value=IGNORE_ID)
         lm_target = pad_sequence(lm_target, batch_first=True, padding_value=IGNORE_ID)
         return lm_target, lm_input, lm_input_len
-
-    # def forward(
-    #         self,
-    #         batch: dict,
-    #         device: torch.device,
-    # ) -> Dict[str, Optional[torch.Tensor]]:
-    #     """
-    #     Args:
-    #         text: (B, L, D)
-    #         text_lengths: (B,)
-    #         audio: (B, T, N) or (B, T)
-    #         audio_lengths: (B,)
-    #     """
-    #     text_token = batch['text_token'].to(device)
-    #     text_token_len = batch['text_token_len'].to(device)
-    #     speech_token = batch['speech_token'].to(device)
-    #     speech_token_len = batch['speech_token_len'].to(device)
-
-
-    #     # 1. encode text_token
-    #     text_token_emb = self.llm.model.model.embed_tokens(text_token)
-
-    #     # 2. encode speech_token
-    #     speech_token_emb = self.speech_embedding(speech_token)
-
-    #     # 3. prepare llm_input/target
-    #     lm_target, lm_input, lm_input_len = self.prepare_lm_input_target(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len)
-    #     lm_target = lm_target.to(device)
-
-    #     # 4. run lm forward
-    #     lm_output, lm_output_mask = self.llm(lm_input, lm_input_len.to(device))
-    #     logits = self.llm_decoder(lm_output)
-    #     loss = self.criterion_ce(logits, lm_target.to(device))
-    #     acc = th_accuracy(logits.view(-1, self.speech_token_size + 3), lm_target, ignore_label=IGNORE_ID)
-    #     return {'loss': loss, 'acc': acc}
     
     def forward(
             self,
@@ -601,8 +543,8 @@ class Qwen2LM(TransformerLM):
         speech_token = batch['speech_token'].to(device)
         speech_token_len = batch['speech_token_len'].to(device)
 
-        speaker_embed = self.get_speaker_conditioning(batch, device)  # [B, 1, llm_input_size]
-
+        if self.use_speaker_encoder:
+            embedding = self.get_speaker_conditioning(batch, device)  # [B, 1, llm_input_size]
 
         # 1. encode text_token
         text_token_emb = self.llm.model.model.embed_tokens(text_token)
@@ -611,7 +553,11 @@ class Qwen2LM(TransformerLM):
         speech_token_emb = self.speech_embedding(speech_token)
 
         # 3. prepare llm_input/target
-        lm_target, lm_input, lm_input_len = self.prepare_lm_input_target_with_spk(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len, speaker_embed)
+        if self.use_speaker_encoder:
+            lm_target, lm_input, lm_input_len = self.prepare_lm_input_target_with_spk(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len, embedding)
+        else:
+            lm_target, lm_input, lm_input_len = self.prepare_lm_input_target(text_token, text_token_emb, text_token_len, speech_token, speech_token_emb, speech_token_len)
+            
         lm_target = lm_target.to(device)
 
         # 4. run lm forward

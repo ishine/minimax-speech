@@ -69,8 +69,7 @@ pip install -r requirements.txt
             --model "speech_tokenizer_v2_25hz"
    ```
 
-   # or you can install via this repo, it will use filelist.txt to extract, each line in filelist.txt contains file audio path
-   # example files_test.txt
+   or you can install via this repo, it will use filelist.txt to extract, each line in filelist.txt contains file audio path - example files_test.txt
 
    ```
    cd speech/tools/S3Tokenizer

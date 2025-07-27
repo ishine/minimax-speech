@@ -69,6 +69,21 @@ pip install -r requirements.txt
             --model "speech_tokenizer_v2_25hz"
    ```
 
+   # or you can install via this repo, it will use filelist.txt to extract, each line in filelist.txt contains file audio path
+   # example files_test.txt
+
+   ```
+   cd speech/tools/S3Tokenizer
+   pip3 install .
+   # example cmd to run
+   torchrun --nproc_per_node=4 --nnodes=1 --rdzv_id=2024 --rdzv_backend="c10d" --rdzv_endpoint="localhost:0" `which s3tokenizer` --root_path /data/dataset/ \
+                --model speech_tokenizer_v2_25hz \
+                --device "cuda" \
+                --batch_size 64 \
+                --file_list /data/learnable-speech/speech/files_test.txt \
+                --skip_existing
+   ```
+
 2. **Extracting DAC-VAE latent**
    ```bash
    cd dac-vae

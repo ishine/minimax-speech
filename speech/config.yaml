@@ -13,7 +13,7 @@ qwen_pretrain_path: ''
 token_frame_rate: 25
 token_mel_ratio: 2
 use_speaker_encoder: True
-speaker_encoder_path: '/data/checkpoint/llm/epoch_29_step_20001.pt' 
+speaker_encoder_path: '' 
 # stream related params
 chunk_size: 25 # streaming inference chunk size, in token
 num_decoding_left_chunks: -1 # streaming inference flow decoder left chunk size, <0 means use all left chunks
@@ -51,8 +51,8 @@ llm: !new:cosyvoice.llm.llm.Qwen2LM
 extract_reference_mel: !name:cosyvoice.dataset.processor.extract_reference_mel_from_speech
     feat_extractor: !ref <feat_extractor>
     min_length: 0.5
-    max_length: 12.0
-    num_crops: 3  # Multiple crops from same utterance
+    max_length: 4.0
+    num_crops: 1  # Multiple crops from same utterance
     training: True
     sample_rate: !ref <sample_rate>
 
@@ -221,7 +221,7 @@ train_conf:
     scheduler_conf:
         warmup_steps: 500
     max_epoch: 2000
-    grad_clip: 1
+    grad_clip: 5
     accum_grad: 1
     log_interval: 5
     save_per_step: 2000

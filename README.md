@@ -1,4 +1,4 @@
-# MiniMax-Speech Technical Implementation
+# Learnable-Speech Technical Implementation
 
 An unofficial implementation based on improvements of cosyvoice with learnable encoder and dac-vae, with core components adapted from [CosyVoice2](https://github.com/FunAudioLLM/CosyVoice).
 
@@ -6,7 +6,7 @@ An unofficial implementation based on improvements of cosyvoice with learnable e
 
 ## Overview
 
-This repository provides an implementation of the MiniMax-Speech model, featuring a two-stage training approach for high-quality 24kHz audio generation.
+This repository provides an implementation of the Learnable-Speech model, featuring a two-stage training approach for high-quality 24kHz audio generation.
 
 ## Key Features
 
@@ -168,7 +168,7 @@ This implementation builds upon several key projects:
 
 - **[CosyVoice2](https://github.com/FunAudioLLM/CosyVoice)**: Core model architectures and training pipelines
 - **[Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec)**: Audio tokenization framework
-- **MiniMax-Speech**: Original technical report and methodology
+- **Learnable-Speech**: Original technical report and methodology
 
 ## Citation
 
@@ -176,8 +176,8 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @article{minimax-speech,
-  title={MiniMax-Speech},
-  author={[MiniMax team]},
+  title={Learnable-Speech},
+  author={[Learnable team]},
   year={[2025]}
   url={https://arxiv.org/pdf/2505.07916}
 }
@@ -200,7 +200,7 @@ This project follows the licensing terms of its dependencies:
 
 - **[CosyVoice2](https://github.com/FunAudioLLM/CosyVoice)**: This implementation extensively uses code and architectures from CosyVoice2
 - **[FSQ](https://github.com/xingchensong/S3Tokenizer)**: For the FSQ implementation
-- **MiniMax team**: For the technical report and methodology
+- **Learnable team**: For the technical report and methodology
 - **FunAudioLLM team**: For the excellent CosyVoice2 codebase
 
 ## Contributing

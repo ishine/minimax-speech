@@ -79,15 +79,30 @@ pip install -r requirements.txt
                 --model speech_tokenizer_v2_25hz \
                 --device "cuda" \
                 --batch_size 64 \
-                --file_list /data/learnable-speech/speech/files_test.txt \
+                --file_list /speech/files_test.txt \
                 --skip_existing
    ```
 
 2. **Extracting DAC-VAE latent**
    ```bash
    cd dac-vae
-   python inference.py --checkpoint checkpoint.pt --config config.yml
+   python extract_dac_latents.py --checkpoint checkpoint.pt --config config.yml --root_path dataset --output_dir dataset/dac
    ```
+
+After processing you should have root folder with following files:
+
+```
+dataset_root/
+├── audio_name.wav
+├── audio_name.txt
+├── audio_name_fsq.pt
+├── audio_name_latent.pt
+├── another_audio.wav
+├── another_audio.txt
+├── another_audio_fsq.pt
+├── another_audio_latent.pt
+└── ...
+```
 
 3. **Stage 1: Auto Regressive Transformer**
    ```bash

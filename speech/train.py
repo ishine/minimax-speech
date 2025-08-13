@@ -54,6 +54,7 @@ def get_args():
         "--qwen_pretrain_path", required=False, help="qwen pretrain path"
     )
     parser.add_argument("--checkpoint", help="checkpoint model")
+    parser.add_argument("--pretrained_model", help="pretrained model")
     parser.add_argument("--model_dir", required=True, help="save model dir")
     parser.add_argument(
         "--tensorboard_dir", default="tensorboard", help="tensorboard log dir"
@@ -209,6 +210,13 @@ def main():
 
     model = configs[args.model]
     start_step, start_epoch = 0, -1
+
+    if args.pretrained_model is not None:
+        # load the pretrained model with some weights is ignore
+        logger.info(f"Load pretrained model from {args.pretrained_model}")
+        state_dict = torch.load(args.pretrained_model, map_location="cpu")
+        model.load_state_dict(state_dict, strict=False)
+
     if args.checkpoint is not None:
         if os.path.exists(args.checkpoint):
             logger.info(f"Load checkpoint from {args.checkpoint}")

@@ -1,8 +1,8 @@
 # MiniMax-Speech Technical Implementation
 
-An unofficial implementation based on the MiniMax-Speech technical report, with core components adapted from [CosyVoice2](https://github.com/FunAudioLLM/CosyVoice).
+An unofficial implementation based on improvements of cosyvoice with learnable encoder and dac-vae, with core components adapted from [CosyVoice2](https://github.com/FunAudioLLM/CosyVoice).
 
-![MiniMax-Speech Architecture](assets/image.png)
+![Architecture](assets/image.png)
 
 ## Overview
 

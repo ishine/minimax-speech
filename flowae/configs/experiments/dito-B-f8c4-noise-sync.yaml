@@ -7,8 +7,8 @@ model:
   args:
     encoder:
       name: vqgan_encoder
-      args: {config_name: f8c4}
-    
+      args: { config_name: f8c4 }
+
     z_shape: [64, 1, 1]
     z_layernorm: true
 
@@ -16,10 +16,10 @@ model:
     zaug_decoding_loss_type: suffix
     zaug_zdm_diffusion:
       name: fm
-      args: {timescale: 1000.0}
-    
-    decoder: {name: identity}
-    
+      args: { timescale: 1000.0 }
+
+    decoder: { name: identity }
+
     renderer:
       name: fixres_renderer_wrapper
       args:
@@ -33,11 +33,11 @@ model:
             c2: 512
             pe_dim: 320
             t_dim: 1280
-    
+
     render_diffusion:
       name: fm
-      args: {timescale: 1000.0}
-    render_sampler: {name: fm_euler_sampler}
+      args: { timescale: 1000.0 }
+    render_sampler: { name: fm_euler_sampler }
     render_n_steps: 50
 
     loss_config: {}

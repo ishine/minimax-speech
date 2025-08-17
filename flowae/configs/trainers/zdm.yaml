@@ -14,7 +14,7 @@ ckpt_select_metric:
 optimizers:
   zdm:
     name: adamw
-    args: {lr: 1.e-4, weight_decay: 0.0}
+    args: { lr: 1.e-4, weight_decay: 0.0 }
 find_unused_parameters: true
 
 evaluate_zdm: true

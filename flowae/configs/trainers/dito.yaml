@@ -11,9 +11,9 @@ vis_iter: 50000
 optimizers:
   encoder:
     name: adamw
-    args: {lr: 1.e-4}
+    args: { lr: 1.e-4 }
   renderer:
     name: adamw
-    args: {lr: 1.e-4}
+    args: { lr: 1.e-4 }
 
 evaluate_ae: true

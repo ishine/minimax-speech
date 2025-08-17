@@ -8,21 +8,21 @@ model:
     # Encoder
     encoder:
       name: dac_encoder
-      args: {config_name: snake}
-    
+      args: { config_name: snake }
+
     # Latent configuration - now fully convolutional
-    z_channels: 64  # Number of latent channels
+    z_channels: 64 # Number of latent channels
 
     zaug_p: 0.1
     zaug_decoding_loss_type: suffix
     zaug_zdm_diffusion:
       name: fm
-      args: {timescale: 1000.0}
-    
+      args: { timescale: 1000.0 }
+
     # Decoder (identity for DiTo)
     decoder:
       name: identity
-    
+
     # Renderer - Fully convolutional for dynamic duration
     renderer:
       name: fixres_renderer_wrapper
@@ -37,12 +37,11 @@ model:
             c2: 512
             pe_dim: 320
             t_dim: 1280
-    
+
     # Diffusion configuration
     render_diffusion:
       name: fm
-      args: {timescale: 1000.0}
-    
-    render_sampler: {name: fm_euler_sampler}
-    render_n_steps: 50
+      args: { timescale: 1000.0 }
 
+    render_sampler: { name: fm_euler_sampler }
+    render_n_steps: 50

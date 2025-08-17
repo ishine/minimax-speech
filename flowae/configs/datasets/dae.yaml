@@ -6,7 +6,7 @@ datasets:
       dataset:
         name: class_folder_audio
         args:
-          root_path: "/home/masuser/minimax-audio/dataset/Emilia/EN"
+          root_path: '/home/masuser/minimax-audio/dataset/Emilia/EN'
           sample_rate: 24000
           duration: 0.38
           shuffle: true
@@ -19,14 +19,14 @@ datasets:
       batch_size: 52
       num_workers: 8
       drop_last: true
-      
+
   val:
     name: wrapper_audio_cae
     args:
       dataset:
         name: class_folder_audio
         args:
-          root_path: "/home/masuser/minimax-audio/dataset/libritts"
+          root_path: '/home/masuser/minimax-audio/dataset/libritts'
           sample_rate: 24000
           duration: 5.0
           shuffle: false
@@ -39,14 +39,14 @@ datasets:
       batch_size: 4
       num_workers: 8
       drop_last: false
-      
+
   eval_ae:
     name: wrapper_audio_cae
     args:
       dataset:
         name: class_folder_audio
         args:
-          root_path: "/home/masuser/minimax-audio/dataset/libritts"
+          root_path: '/home/masuser/minimax-audio/dataset/libritts'
           sample_rate: 24000
           duration: 5.0
           shuffle: false

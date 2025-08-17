@@ -4,7 +4,14 @@ datasets:
     args:
       dataset:
         name: class_folder
-        args: {root_path: /home/masuser/minimax-audio/mnist_png/training, resize: 256, rand_crop: 256, rand_flip: true, image_only: true}
+        args:
+          {
+            root_path: /home/masuser/minimax-audio/mnist_png/training,
+            resize: 256,
+            rand_crop: 256,
+            rand_flip: true,
+            image_only: true,
+          }
       resize_inp: 256
       gt_glores_lb: 256
       gt_glores_ub: 256
@@ -12,13 +19,19 @@ datasets:
     loader:
       batch_size: 14
       num_workers: 24
-  
+
   val:
     name: wrapper_cae
     args:
       dataset:
         name: class_folder
-        args: {root_path: /home/masuser/minimax-audio/mnist_png/testing, resize: 256, square_crop: true, image_only: true}
+        args:
+          {
+            root_path: /home/masuser/minimax-audio/mnist_png/testing,
+            resize: 256,
+            square_crop: true,
+            image_only: true,
+          }
       resize_inp: 256
       gt_glores_lb: 256
       gt_glores_ub: 256
@@ -26,13 +39,19 @@ datasets:
     loader:
       batch_size: 14
       num_workers: 24
-  
+
   eval_ae:
     name: wrapper_cae
     args:
       dataset:
         name: class_folder
-        args: {root_path: /home/masuser/minimax-audio/mnist_png/testing, resize: 256, square_crop: true, image_only: true}
+        args:
+          {
+            root_path: /home/masuser/minimax-audio/mnist_png/testing,
+            resize: 256,
+            square_crop: true,
+            image_only: true,
+          }
       resize_inp: 256
       gt_glores_lb: 256
       gt_glores_ub: 256

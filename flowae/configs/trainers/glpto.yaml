@@ -11,13 +11,13 @@ vis_iter: 50000
 optimizers:
   encoder:
     name: adam
-    args: {lr: 1.e-4, betas: [0.5, 0.9]}
+    args: { lr: 1.e-4, betas: [0.5, 0.9] }
   renderer:
     name: adam
-    args: {lr: 1.e-4, betas: [0.5, 0.9]}
+    args: { lr: 1.e-4, betas: [0.5, 0.9] }
   disc:
     name: adam
-    args: {lr: 1.e-4, betas: [0.5, 0.9]}
+    args: { lr: 1.e-4, betas: [0.5, 0.9] }
 gan_start_after_iters: 50000
 find_unused_parameters: true
 

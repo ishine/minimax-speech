@@ -15,12 +15,15 @@ This repository provides an implementation of the Learnable-Speech model, featur
 - [x] **Immiscible assignment**: Support immiscible adding noise while training
 - [x] **Contrastive Flow matching**: Support Contrastive training
 - [ ] **Checkpoint release**: Release LLM and Contrastive FM checkpoint
+
 ## Architecture
 
 ### Stage 1: Audio to Discrete Tokens
+
 Converts raw audio into discrete representations using the FSQ (S3Tokenizer) framework.
 
 ### Stage 2: Discrete Tokens to Continuous Latent Space
+
 Maps discrete tokens to a continuous latent space using a Variational Autoencoder (VAE).
 
 > **Note**: This implementation uses standard DAC-VAE instead of Flow-VAE.
@@ -30,28 +33,33 @@ Maps discrete tokens to a continuous latent space using a Variational Autoencode
 ### 1. Model Training
 
 #### BPE tokens to FSQ tokens
+
 - Based on the FSQ
 - Using Auto Regressive to predict the FSQ tokens with learnable speaker extractor
 
 #### FSQ tokens to DAC-VAE latent
+
 - Based on Cosyvoice2 flow matching decoder
 - Learns continuous latent representations from discrete tokens
 
 ### 2. Feature Extraction
 
 Before training the main model:
+
 1. Extract discrete tokens using the trained FSQ [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
 2. Generate continuous latent representations using the trained DAC-VAE - the pretrained I provided [DAC-VAE](https://github.com/primepake/learnable-speech/releases/tag/dac-vae)
 
 ### 3. Two-Stage Training
 
 Train the models sequentially:
-- **Stage 1**: BPE tokens → Discrete FSQ 
+
+- **Stage 1**: BPE tokens → Discrete FSQ
 - **Stage 2**: Discrete FSQ → DAC-VAE Continuous latent space
 
 ## Getting Started
 
 ### Prerequisites
+
 ```bash
 # List your dependencies here
 pip install -r requirements.txt
@@ -60,6 +68,7 @@ pip install -r requirements.txt
 ### Training Pipeline
 
 1. **Extracting FSQ**
+
    ```bash
    pip install s3tokenizer
    s3tokenizer --wav_scp data.scp \
@@ -84,6 +93,7 @@ pip install -r requirements.txt
    ```
 
 2. **Extracting DAC-VAE latent**
+
    ```bash
    cd dac-vae
    python extract_dac_latents.py --checkpoint checkpoint.pt --config config.yml --root_path dataset --output_dir dataset/dac
@@ -105,6 +115,7 @@ dataset_root/
 ```
 
 3. **Stage 1: Auto Regressive Transformer**
+
    ```bash
    #!/bin/bash
    pretrained_model_dir=./pretrained_models/CosyVoice2-0.5B
@@ -136,6 +147,7 @@ dataset_root/
    ```
 
 4. **Stage 2: FLow matching decoder**
+
    ```bash
    #!/bin/bash
    pretrained_model_dir=./pretrained_models/CosyVoice2-0.5B
@@ -166,6 +178,7 @@ dataset_root/
    ```
 
 ## Project Structure
+
 ```
 minimax-speech/
 ├── assets/
@@ -208,6 +221,7 @@ If you use this code in your research, please cite:
 ## License
 
 This project follows the licensing terms of its dependencies:
+
 - CosyVoice2 components: [Check CosyVoice2 License](https://github.com/FunAudioLLM/CosyVoice/blob/main/LICENSE)
 - FSQ components: [Apache 2.0 License](https://github.com/xingchensong/S3Tokenizer/blob/main/LICENSE)
 
@@ -223,5 +237,5 @@ This project follows the licensing terms of its dependencies:
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Disclaimer
-The content provided above is for academic purposes only and is intended to demonstrate technical capabilities.
 
+The content provided above is for academic purposes only and is intended to demonstrate technical capabilities.

@@ -15,6 +15,7 @@ This repository provides an implementation of the Learnable-Speech model, featur
 - [x] **Immiscible assignment**: Support immiscible adding noise while training
 - [x] **Contrastive Flow matching**: Support Contrastive training
 - [ ] **Checkpoint release**: Release LLM and Contrastive FM checkpoint
+- [ ] **MeanFlow**: Meanflow for FM model
 
 ## Architecture
 

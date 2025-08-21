@@ -396,6 +396,36 @@ def extract_reference_mel_from_speech(
         yield sample
 
 
+def compute_fbank(data,
+                  feat_extractor,
+                  token_mel_ratio=0,
+                  mode='train'):
+    """ Extract fbank
+
+        Args:
+            data: Iterable[{key, wav, label, sample_rate}]
+
+        Returns:
+            Iterable[{key, feat, label}]
+    """
+    for sample in data:
+        assert 'sample_rate' in sample
+        assert 'speech' in sample
+        assert 'utt' in sample
+        assert 'text_token' in sample
+        waveform = sample['speech']
+        feat = feat_extractor(waveform).squeeze(dim=0).transpose(0, 1)
+        # if token_mel_ratio != 0:
+        #     pass
+            # trim to align speech_token and speech_feat
+            # token_len = int(min(feat.shape[0] / token_mel_ratio, sample["speech_token"].shape[0]))
+            # feat = feat[:token_mel_ratio * token_len]
+            # sample["speech_token"] = sample["speech_token"][:token_len]
+        sample['speech_mel'] = feat
+        print('feat shape, ', feat.shape)
+        yield sample
+
+
 def tokenize(data, get_tokenizer, allowed_special, mode='train'):
     """ Decode text to chars or BPE
         Inplace operation
@@ -563,6 +593,12 @@ def padding(data, mode='train', gan=False, dpo=False, use_speaker_encoder=False)
                                    batch_first=True,
                                    padding_value=0)
 
+        speech_mel = [sample[i]['speech_mel'] for i in order]
+        speech_mel_len = torch.tensor([i.size(0) for i in speech_mel], dtype=torch.int32)
+        speech_mel = pad_sequence(speech_mel,
+                                   batch_first=True,
+                                   padding_value=0)
+
         text = [sample[i]['text'] for i in order]
         text_token = [torch.tensor(sample[i]['text_token']) for i in order]
         text_token_len = torch.tensor([i.size(0) for i in text_token], dtype=torch.int32)
@@ -574,8 +610,10 @@ def padding(data, mode='train', gan=False, dpo=False, use_speaker_encoder=False)
             "speech_len": speech_len,
             "speech_token": speech_token,
             "speech_token_len": speech_token_len,
+            "speech_mel": speech_mel,
+            "speech_mel_len": speech_mel_len,
             "speech_latent": speech_latent,
-            "speech_latent_len": speech_latent,
+            "speech_latent_len": speech_latent_len,
             "text": text,
             "text_token": text_token,
             "text_token_len": text_token_len,

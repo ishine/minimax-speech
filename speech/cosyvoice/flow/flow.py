@@ -208,7 +208,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         vocab_size: int = 4096,
         input_frame_rate: int = 50,
         only_mask_loss: bool = True,
-        token_mel_ratio: int = 2,
+        token_latent_ratio: int = 2,
         pre_lookahead_len: int = 3,
         use_speaker_encoder: bool = False,  # Add this
         freeze_speaker_encoder: bool = False,  # Add this
@@ -324,7 +324,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         self.encoder_proj = torch.nn.Linear(self.encoder.output_size(), output_size)
         self.decoder = decoder
         self.only_mask_loss = only_mask_loss
-        self.token_mel_ratio = token_mel_ratio
+        self.token_latent_ratio = token_latent_ratio
         self.pre_lookahead_len = pre_lookahead_len
         print(" decoder_conf['cfm_params']: ", decoder_conf["cfm_params"])
         self.use_contrastive_fm = decoder_conf["cfm_params"]["use_contrastive_fm"]

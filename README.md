@@ -48,7 +48,8 @@ Maps discrete tokens to a continuous latent space using a Variational Autoencode
 Before training the main model:
 
 1. Extract discrete tokens using the trained FSQ [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
-2. Generate continuous latent representations using the trained DAC-VAE - the pretrained I provided [DAC-VAE](https://github.com/primepake/learnable-speech/releases/tag/dac-vae)
+2. Generate continuous latent representations using the trained DAC-VAE - the pretrained I provided [DAC-VAE](https://github.com/primepake/learnable-speech/releases/tag/dac-vae) 
+ - Notes: This model is trained with scale one fsq token will have 3 fractor of frame rate in dac-vae latent, will update 2 fractor soon
 
 ### 3. Two-Stage Training
 

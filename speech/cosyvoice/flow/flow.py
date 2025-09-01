@@ -385,8 +385,8 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
     ) -> Dict[str, Optional[torch.Tensor]]:
         token = batch["speech_token"].to(device)
         token_len = batch["speech_token_len"].to(device)
-        feat = batch["speech_feat"].to(device)
-        feat_len = batch["speech_feat_len"].to(device)
+        feat = batch["speech_latent"].to(device)
+        feat_len = batch["speech_latent_len"].to(device)
 
         # NOTE unified training, static_chunk_size > 0 or = 0
         streaming = False  # if random.random() < 0.5 else False

@@ -19,7 +19,7 @@ from contextlib import nullcontext
 import torch
 import torch.distributed as dist
 from cosyvoice.utils.train_utils import (batch_backward, batch_forward,
-                                         cosyvoice_join, log_per_save,
+                                         log_per_save,
                                          log_per_step, save_model,
                                          update_parameter_and_lr)
 

@@ -64,7 +64,7 @@ def individual_file_opener(data, mode='train', tts_data={}, token_latent_ratio=3
                 # Check if all required files exist
                 txt_path = wav_path.replace('.wav', '.txt')
                 token_path = wav_path.replace('.wav', '_fsq.pt')
-                latent_path = wav_path.replace('.wav', '_latent.pt')
+                latent_path = wav_path.replace('.wav', '_latent2x.pt')
                 
                 if not os.path.exists(txt_path):
                     logging.warning(f'Text file not found for {wav_path}, skipping')
@@ -109,7 +109,7 @@ def individual_file_opener(data, mode='train', tts_data={}, token_latent_ratio=3
             for wav_path in wav_files:
                 txt_path = wav_path.replace('.wav', '.txt')
                 token_path = wav_path.replace('.wav', '_fsq.pt')
-                latent_path = wav_path.replace('.wav', '_latent.pt')
+                latent_path = wav_path.replace('.wav', '_latent2x.pt')
                 
                 if not os.path.exists(txt_path):
                     logging.warning(f'Text file not found for {wav_path}, skipping')
@@ -152,9 +152,11 @@ def individual_file_opener(data, mode='train', tts_data={}, token_latent_ratio=3
 
                 if token_latent_ratio != 0:
                     # trim to align speech_token and speech_feat
+                    print('before algin speech_latent: ', speech_latent.shape)
                     token_len = int(min(speech_latent.shape[0] / token_latent_ratio, len(speech_token)))
                     speech_latent = speech_latent[:token_latent_ratio * token_len]
                     speech_token = speech_token[:token_len]
+                    print('after algin speech_latent: ', speech_latent.shape)
 
                 # Build sample dict
                 sample_dict = {
@@ -422,7 +424,7 @@ def compute_fbank(data,
             # feat = feat[:token_mel_ratio * token_len]
             # sample["speech_token"] = sample["speech_token"][:token_len]
         sample['speech_mel'] = feat
-        print('feat shape, ', feat.shape)
+        # print('feat shape, ', feat.shape)
         yield sample
 
 

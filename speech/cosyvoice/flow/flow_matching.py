@@ -237,7 +237,8 @@ class ConditionalCFM(BASECFM):
             y: conditional flow
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        b, d, T = mu.shape
+        b, d, T = x1.shape
+        print('x1: ', x1.shape)
 
         # random timestep
         t = torch.rand([b, 1, 1], device=mu.device, dtype=mu.dtype)
@@ -254,7 +255,8 @@ class ConditionalCFM(BASECFM):
             x1_flat = x1.flatten(start_dim=1).to(torch.float16)
             z_candidates_flat = z_candidates.flatten(start_dim=2).to(torch.float16)
             
-          
+            print('x1_flat.unsqueeze(1) shape: ', x1_flat.unsqueeze(1).shape, )
+            print('z_candidates_flat shape: ', z_candidates_flat.shape)
             distances = torch.norm(x1_flat.unsqueeze(1) - z_candidates_flat, dim=2)
            
             min_distances, min_indices = torch.min(distances, dim=1)
@@ -295,7 +297,7 @@ class ConditionalCFM(BASECFM):
             mu = mu * cfg_mask.view(-1, 1, 1)
             spks = spks * cfg_mask.view(-1, 1)
             cond = cond * cfg_mask.view(-1, 1, 1)
-
+        print('input shape of x_t: ', x_t.shape, 'mask ', mask.shape, 'mu ', mu.shape, 'spks ', spks.shape, 'cond ', cond.shape)
         pred = self.estimator(x_t, mask, mu, t.squeeze(), spks, cond, streaming=streaming)
 
         positive_loss = F.mse_loss(pred * mask, u_positive * mask, reduction="sum") / (torch.sum(mask) * d)

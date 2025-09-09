@@ -1,5 +1,6 @@
 import gradio as gr
 import numpy as np
+import os
 
 def synthesize_speech(text, speaker_id=0):
     """
@@ -33,7 +34,15 @@ def synthesize_speech(text, speaker_id=0):
     return (sample_rate, audio.astype(np.float32))
 
 def create_demo():
-    with gr.Blocks(title="Learnable-Speech Demo", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(
+        title="Learnable-Speech Demo",
+        theme=gr.themes.Default(),
+        css="""
+        .gradio-container {
+            max-width: 1200px !important;
+        }
+        """
+    ) as demo:
         gr.Markdown(
             """
             # 🎤 Learnable-Speech: High-Quality 24kHz Speech Synthesis
@@ -135,19 +144,20 @@ def create_demo():
                 """
             )
         
-        # Example inputs
-        gr.Examples(
-            examples=[
-                ["Hello everyone! I am here to tell you that Learnable-Speech is amazing!", 0],
-                ["The Secret Service believed that it was very doubtful that any President would ride regularly in a vehicle.", 1],
-                ["We propose Learnable-Speech, a new approach to neural text-to-speech synthesis.", 2],
-                ["This implementation uses flow matching for high-quality 24kHz audio generation.", 3],
-            ],
-            inputs=[text_input, speaker_slider],
-            outputs=audio_output,
-            fn=synthesize_speech,
-            cache_examples=False,
-        )
+        with gr.Row():
+            gr.Examples(
+                examples=[
+                    ["Hello everyone! I am here to tell you that Learnable-Speech is amazing!"],
+                    ["The Secret Service believed that it was very doubtful that any President would ride regularly in a vehicle."],
+                    ["We propose Learnable-Speech, a new approach to neural text-to-speech synthesis."],
+                    ["This implementation uses flow matching for high-quality 24kHz audio generation."],
+                ],
+                inputs=[text_input],
+                fn=lambda x: synthesize_speech(x, 0),
+                outputs=audio_output,
+                cache_examples=False,
+                label="Example Texts"
+            )
         
         generate_btn.click(
             fn=synthesize_speech,
@@ -158,9 +168,27 @@ def create_demo():
     return demo
 
 if __name__ == "__main__":
+    # Get environment variables for flexible deployment
+    port = int(os.environ.get("PORT", 7860))
+    host = os.environ.get("HOST", "0.0.0.0")
+    
     demo = create_demo()
-    demo.launch(
-        server_name="0.0.0.0", 
-        server_port=7860,
-        share=False
-    )
+    
+    # Try to launch with error handling
+    try:
+        demo.launch(
+            server_name=host,
+            server_port=port,
+            share=False,
+            show_error=True,
+            quiet=False,
+            enable_queue=True
+        )
+    except Exception as e:
+        print(f"Failed to launch on {host}:{port}, trying with share=True")
+        demo.launch(
+            share=True,
+            show_error=True,
+            quiet=False,
+            enable_queue=True
+        )

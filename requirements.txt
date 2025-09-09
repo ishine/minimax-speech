@@ -17,6 +17,7 @@ lightning==2.2.4
 matplotlib==3.7.5
 modelscope==1.20.0
 networkx==3.1
+numpy==1.24.3
 omegaconf==2.3.0
 onnx==1.16.0
 onnxruntime-gpu==1.18.0; sys_platform == 'linux'
@@ -42,3 +43,8 @@ flatten_dict
 julius
 importlib_resources
 randomname
+
+# Optional: Add these if you need the full training pipeline
+# deepspeed==0.12.6
+# tensorboard==2.14.0
+# matplotlib==3.7.2

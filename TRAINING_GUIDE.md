@@ -111,27 +111,31 @@ def synthesize_speech(text, speaker_id=0):
 
 ## 🎯 Training Configurations
 
-### For Different Environments:
+### For Different Environments
 
 1. **Local Development** (Single GPU):
+
    ```bash
    export CUDA_VISIBLE_DEVICES="0"
    python speech/train.py --config speech/config.yaml --model llm ...
    ```
 
 2. **Multi-GPU Training**:
+
    ```bash
    export CUDA_VISIBLE_DEVICES="0,1,2,3"
    torchrun --nproc_per_node=4 speech/train.py ...
    ```
 
 3. **Cloud Training** (Google Colab/Kaggle):
+
    ```python
    # Use config_hf.yaml for resource-constrained environments
    !python speech/train.py --config speech/config_hf.yaml ...
    ```
 
 4. **Hugging Face Spaces**:
+
    ```bash
    # For direct training on HF infrastructure
    python speech/train.py --config speech/config_hf.yaml --timeout 1800 ...
@@ -140,6 +144,7 @@ def synthesize_speech(text, speaker_id=0):
 ## 📊 Monitoring Training
 
 1. **Comet ML** (Recommended):
+
    ```bash
    # Set up Comet ML for experiment tracking
    export COMET_API_KEY="your_api_key"
@@ -147,11 +152,13 @@ def synthesize_speech(text, speaker_id=0):
    ```
 
 2. **Tensorboard**:
+
    ```bash
    tensorboard --logdir ./tensorboard
    ```
 
 3. **Command Line**:
+
    ```bash
    # Monitor log files
    tail -f checkpoints/llm/train.log
@@ -159,7 +166,7 @@ def synthesize_speech(text, speaker_id=0):
 
 ## 🔧 Troubleshooting
 
-### Common Issues:
+### Common Issues
 
 1. **Out of Memory**:
    - Reduce batch size in config
@@ -176,9 +183,10 @@ def synthesize_speech(text, speaker_id=0):
    - Verify data preprocessing
    - Use pretrained checkpoints
 
-### Performance Tips:
+### Performance Tips
 
 1. **Data Loading Optimization**:
+
    ```yaml
    # In config.yaml
    num_workers: 24
@@ -187,12 +195,14 @@ def synthesize_speech(text, speaker_id=0):
    ```
 
 2. **Memory Optimization**:
+
    ```bash
    # Use gradient checkpointing
    --use_amp --accum_grad 2
    ```
 
 3. **Speed Optimization**:
+
    ```bash
    # Compile model for faster training (PyTorch 2.0+)
    export TORCH_COMPILE=1

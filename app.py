@@ -40,7 +40,26 @@ def create_demo():
             
             An unofficial implementation based on improvements of CosyVoice with learnable encoder and DAC-VAE.
             
-            > **Note**: This is a demo interface. To use the actual model, you need to train it first using the provided training pipeline.
+            > **⚠️ This is a demo interface with placeholder audio. To use the actual model, you need to train it first!**
+            
+            ## 🚀 How to Train Your Own Model:
+            
+            1. **Follow the [Training Guide](https://github.com/primepake/learnable-speech/blob/main/TRAINING_GUIDE.md)**
+            2. **Use the provided training scripts** in the `scripts/` directory
+            3. **Upload your trained models** to Hugging Face Hub
+            4. **Replace the placeholder code** in this Space with your models
+            
+            ### Quick Start:
+            ```bash
+            # 1. Prepare your dataset
+            ./scripts/prepare_data.sh
+            
+            # 2. Train the model
+            ./scripts/train_full_pipeline.sh
+            
+            # 3. Upload to Hugging Face
+            python scripts/upload_to_hf.py --username your_username
+            ```
             """
         )
         
@@ -70,7 +89,27 @@ def create_demo():
                     type="numpy"
                 )
         
-        with gr.Accordion("📋 Project Information", open=False):
+        with gr.Accordion("🎯 Training Status & Next Steps", open=True):
+            gr.Markdown(
+                """
+                ### 📋 Current Status:
+                - ✅ **Demo Interface**: Ready
+                - ❌ **Trained Models**: Not available (placeholder audio only)
+                - ❌ **Model Inference**: Not implemented yet
+                
+                ### 🔧 To Enable Real Speech Synthesis:
+                1. **Train the models** using the provided pipeline
+                2. **Upload trained checkpoints** to Hugging Face Hub  
+                3. **Update the inference code** in `synthesize_speech()` function
+                4. **Test with real model outputs**
+                
+                ### 📚 Resources:
+                - [📖 Complete Training Guide](https://github.com/primepake/learnable-speech/blob/main/TRAINING_GUIDE.md)
+                - [🛠️ Training Scripts](https://github.com/primepake/learnable-speech/tree/main/scripts)
+                - [📄 Research Paper](https://arxiv.org/pdf/2505.07916)
+                - [💻 GitHub Repository](https://github.com/primepake/learnable-speech)
+                """
+            )
             gr.Markdown(
                 """
                 ### Key Features

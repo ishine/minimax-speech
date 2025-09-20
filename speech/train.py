@@ -33,6 +33,7 @@ from cosyvoice.utils.train_utils import (check_modify_and_save_config,
                                          init_dataset_and_dataloader,
                                          init_optimizer_and_scheduler,
                                          save_model)
+# torch.multiprocessing.set_sharing_strategy('file_system')
 
 os.environ["COMET_LOGGING_CONSOLE"] = "ERROR"  # Only show errors
 
@@ -68,7 +69,7 @@ def get_args():
     )
     parser.add_argument(
         "--num_workers",
-        default=0,
+        default=32,
         type=int,
         help="num of subprocess workers for reading",
     )
@@ -217,6 +218,11 @@ def main():
         state_dict = torch.load(args.pretrained_model, map_location="cpu")
         model.load_state_dict(state_dict, strict=False)
 
+    # Dispatch model from cpu to gpu
+    model = model.cuda()
+
+    model, optimizer, scheduler = init_optimizer_and_scheduler(configs, model)
+
     if args.checkpoint is not None:
         if os.path.exists(args.checkpoint):
             logger.info(f"Load checkpoint from {args.checkpoint}")
@@ -226,6 +232,10 @@ def main():
                 start_step = state_dict["step"]
             if "epoch" in state_dict:
                 start_epoch = state_dict["epoch"]
+            if 'optimizer' in state_dict:
+                optimizer.load_state_dict(state_dict['optimizer'])
+            if 'scheduler' in state_dict:
+                scheduler.load_state_dict(state_dict['scheduler'])
             # Log checkpoint info to Comet
             if experiment:
                 experiment.log_parameter("checkpoint", args.checkpoint)
@@ -234,21 +244,22 @@ def main():
         else:
             logger.warning(f"checkpoint {args.checkpoint} do not exsist!")
 
-    # Dispatch model from cpu to gpu
-    model = model.cuda()
+    
     model = torch.nn.parallel.DistributedDataParallel(
         model, find_unused_parameters=True
     )
 
     # Get optimizer & scheduler
-    model, optimizer, scheduler = init_optimizer_and_scheduler(configs, model)
-    scheduler.set_step(start_step)
+    
+    
 
     # Save init checkpoints
     info_dict = deepcopy(configs["train_conf"])
     info_dict["step"] = start_step
     info_dict["epoch"] = start_epoch
-    save_model(model, "init", info_dict)
+
+    if start_step == 0:
+        save_model(model, optimizer, scheduler, "init", info_dict)
 
     # Log model save to Comet
     if experiment:

@@ -118,7 +118,7 @@ class Executor:
                 model_name = (
                     f"epoch_{self.epoch}_step_{self.step + 1}"
                 )
-                save_model(model, model_name, info_dict)
+                save_model(model, optimizer, scheduler, model_name, info_dict)
                 model.train()
 
             if (batch_idx + 1) % info_dict["accum_grad"] == 0:
@@ -126,7 +126,7 @@ class Executor:
         dist.barrier()
 
     @torch.inference_mode()
-    def cv(self, model, cv_data_loader, experiment, info_dict, on_batch_end=True):
+    def cv(self, model, optimizer, scheduler, cv_data_loader, experiment, info_dict, on_batch_end=True):
         """Cross validation on"""
         logger.info(f"Epoch {self.epoch} Step {self.step + 1} on_batch_end {on_batch_end} CV rank {self.rank}")
         model.eval()
@@ -158,4 +158,4 @@ class Executor:
             if on_batch_end
             else f"epoch_{self.epoch}_step_{self.step + 1}"
         )
-        save_model(model, model_name, info_dict)
+        save_model(model, optimizer, scheduler, model_name, info_dict)

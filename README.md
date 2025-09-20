@@ -108,12 +108,29 @@ dataset_root/
 ├── audio_name.wav
 ├── audio_name.txt
 ├── audio_name_fsq.pt
-├── audio_name_latent.pt
+├── audio_name_latent2x.pt
 ├── another_audio.wav
 ├── another_audio.txt
 ├── another_audio_fsq.pt
-├── another_audio_latent.pt
+├── another_audio_latent2x.pt
 └── ...
+```
+
+Final step, generate train_index.json by
+```
+cd speech/tools
+
+python generate_json_index.py --input /speech/files_test.txt --output train_index.json
+
+```
+
+Then create the file data.list with contents are list path of json files
+
+```
+touch data.list
+
+echo "train_index.json" > data/data.list
+
 ```
 
 3. **Stage 1: Auto Regressive Transformer**

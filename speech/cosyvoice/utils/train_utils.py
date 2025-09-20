@@ -157,12 +157,14 @@ def init_dataset_and_dataloader(args, configs, dpo):
                                    batch_size=None,
                                    pin_memory=args.pin_memory,
                                    num_workers=args.num_workers,
-                                   prefetch_factor=args.prefetch)
+                                   prefetch_factor=args.prefetch,
+                                   persistent_workers=False)
     cv_data_loader = DataLoader(cv_dataset,
                                 batch_size=None,
                                 pin_memory=args.pin_memory,
                                 num_workers=args.num_workers,
-                                prefetch_factor=args.prefetch)
+                                prefetch_factor=args.prefetch,
+                                persistent_workers=False)
     return train_dataset, cv_dataset, train_data_loader, cv_data_loader
 
 
@@ -246,7 +248,7 @@ def init_optimizer_and_scheduler(configs, model):
 
 
 
-def save_model(model, model_name, info_dict):
+def save_model(model, optimizer, scheduler, model_name, info_dict):
     """Save model"""
     rank = int(os.environ.get('RANK', 0))
     model_dir = info_dict["model_dir"]
@@ -256,7 +258,16 @@ def save_model(model, model_name, info_dict):
 
     if info_dict["train_engine"] == "torch_ddp":
         if rank == 0:
-            torch.save({**model.module.state_dict(), 'epoch': info_dict['epoch'], 'step': info_dict['step']}, save_model_path)
+            torch.save(
+                {
+                    **model.module.state_dict(), 
+                    'epoch': info_dict['epoch'], 
+                    'step': info_dict['step'],
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, 
+                save_model_path
+                )
     else:
         with torch.no_grad():
             model.save_checkpoint(save_dir=model_dir,

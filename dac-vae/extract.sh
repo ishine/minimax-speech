@@ -5,7 +5,8 @@ python extract_dac_latents.py \
     --checkpoint ./ckpts/300k_20250829_044827/checkpoint.pt\
     --config ./configs/configx2.yml \
     --num_gpus 4 \
-    --num_decode_samples 10
+    --num_decode_samples 10 \
+    --skip_existing
 
 
 python extract_dac_latents.py \
@@ -14,4 +15,5 @@ python extract_dac_latents.py \
     --checkpoint ./checkpoint.pt \
     --config ./config.yml \
     --num_gpus 1 \
-    --num_decode_samples 10
+    --num_decode_samples 10 \
+    --skip_existing

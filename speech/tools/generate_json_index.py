@@ -18,7 +18,7 @@ def validate_file_set(wav_path):
     """Check if all required files exist for a given wav file"""
     txt_path = wav_path.replace('.wav', '.txt')
     token_path = wav_path.replace('.wav', '_fsq.pt')
-    latent_path = wav_path.replace('.wav', '_latent.pt')
+    latent_path = wav_path.replace('.wav', '_latent2x.pt')
     
     # Check all files exist
     if not all(os.path.exists(p) for p in [wav_path, txt_path, token_path, latent_path]):
@@ -254,3 +254,5 @@ if __name__ == "__main__":
 # python generate_json_index.py --input /data/dataset/emilia /data/dataset/vivoice --output dataset_index.json
 # python generate_json_index.py --input train_files.txt --output train_index.json
 # python generate_json_index.py --input /data/dataset/emilia --output dataset_index.json --split 0.8 0.1 0.1
+# python generate_json_index.py --input /data/learnable/speech/files_test.txt --output test_index.json
+# python generate_json_index.py --input /data/learnable/speech/files.txt --output train_index.json

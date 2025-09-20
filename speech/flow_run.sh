@@ -25,8 +25,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --rdzv_id=$job_id --rdzv_backend=
   --num_workers ${num_workers} \
   --prefetch ${prefetch} \
   --use_amp \
-  --pretrained_model ./pretrained_models/CosyVoice2-0.5B/flow.pt
-
+  --checkpoint /data/checkpoint/flow/epoch_5_step_174001.pt
 
 # torchrun --nproc_per_node=4 --nnodes=1 --rdzv_id=2024 --rdzv_backend="c10d" --rdzv_endpoint="localhost:0" `which s3tokenizer` --root_path /data/dataset/ \
 #                 --model speech_tokenizer_v2_25hz \

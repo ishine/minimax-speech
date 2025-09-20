@@ -253,6 +253,10 @@ if __name__ == "__main__":
 # Example usage:
 # python generate_json_index.py --input /data/dataset/emilia /data/dataset/vivoice --output dataset_index.json
 # python generate_json_index.py --input train_files.txt --output train_index.json
+<<<<<<< HEAD
 # python generate_json_index.py --input /data/dataset/emilia --output dataset_index.json --split 0.8 0.1 0.1
 # python generate_json_index.py --input /data/learnable/speech/files_test.txt --output test_index.json
 # python generate_json_index.py --input /data/learnable/speech/files.txt --output train_index.json
+=======
+# python generate_json_index.py --input /data/dataset/emilia --output dataset_index.json --split 0.8 0.1 0.1
+>>>>>>> 2453af954b8dd550f2f31957ff9d7722ee547afc

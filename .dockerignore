@@ -1,0 +1,45 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+.DS_Store
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Large model files (download separately)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# Dataset files
+*.wav
+*.mp3
+*.flac
+*.parquet
+
+# Logs and temporary files
+logs/
+wandb/
+tmp/
+temp/
